@@ -5,9 +5,9 @@
 현재 기준으로 안정적으로 맞춰진 소스는 아래 2개입니다.
 
 - `thekingsbible.com` KJV
-- 대한성서공회 `bskorea.or.kr` 개역개정(NKRV, `version=GAE`)
+- `bskorea.or.kr` NKRV(`version=GAE`)
 
-대한성서공회 설계 문서는 [docs/bskorea_scraping_design.md](docs/bskorea_scraping_design.md)에 있습니다.
+NKRV 설계 문서는 [docs/bskorea_scraping_design.md](docs/bskorea_scraping_design.md)에 있습니다.
 
 ## 주요 특징
 
@@ -85,7 +85,7 @@ NKRV_ENTRY_URL=https://www.bskorea.or.kr/bible/korbibReadpage.php?version=GAE&bo
 
 번역본 힌트는 아래 값으로 판단합니다.
 
-- NKRV 힌트: `BIBLE_TRANSLATION_ID=2`, `BIBLE_TRANSLATION_TYPE=NKRV`, `BIBLE_TRANSLATION_NAME=개역개정`, `BIBLE_LANGUAGE_CODE=ko`
+- NKRV 힌트: `BIBLE_TRANSLATION_ID=2`, `BIBLE_TRANSLATION_TYPE=NKRV`, `BIBLE_LANGUAGE_CODE=ko`
 - KJV 힌트: `BIBLE_TRANSLATION_TYPE=KJV`, `BIBLE_LANGUAGE_CODE=en`
 
 둘 다 모호하면 NKRV URL을 우선 선택합니다.
@@ -126,7 +126,7 @@ BIBLE_TRANSLATION_ID=2
 
 ```env
 BIBLE_TRANSLATION_TYPE=NKRV
-BIBLE_TRANSLATION_NAME=개역개정
+BIBLE_TRANSLATION_NAME=your_nkrv_translation_name
 BIBLE_LANGUAGE_CODE=ko
 ```
 
