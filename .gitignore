@@ -7,8 +7,9 @@ __pycache__/
 /.venv/
 /.venv-wsl/
 
-# Local config
+# Local config (credentials — keep backups/variants ignored too)
 /.env
+/.env.*
 
 # OMC
 /.omc/
