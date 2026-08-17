@@ -50,6 +50,14 @@ class FakeConn:
             1001: {1},
             2002: set(),
         }
+        self.commits = 0
+        self.rollbacks = 0
+
+    def commit(self) -> None:
+        self.commits += 1
+
+    def rollback(self) -> None:
+        self.rollbacks += 1
 
 
 class FakeScraper:
@@ -246,6 +254,64 @@ def test_process_book_reuses_existing_and_inserts_missing_using_book_key() -> No
     assert [verse.verse_number for verse in repo.inserted_verses[0][1]] == [2]
     assert repo.inserted_verses[1][0] == 2002
     assert [verse.verse_number for verse in repo.inserted_verses[1][1]] == [1]
+    # One commit per processed chapter.
+    assert conn.commits == 2
+
+
+def test_process_book_commits_after_each_chapter() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    scraper = FakeScraper(
+        "https://www.bskorea.or.kr/bible/korbibReadpage.php"
+        "?version=GAE&book=lev&chap=1&sec=1&cVersion=&fontSize=15px&fontWeight=normal"
+    )
+    book = Book(id=69, book_order=3, book_key="LEV", abbreviation="레", name="레위기")
+
+    commit_marks: list[int] = []
+    original_commit = conn.commit
+
+    def tracking_commit() -> None:
+        commit_marks.append(len(repo.inserted_verses))
+        original_commit()
+
+    conn.commit = tracking_commit  # type: ignore[method-assign]
+
+    process_book(repo=repo, conn=conn, scraper=scraper, book=book)
+
+    # Each commit lands right after that chapter's verse insert, not batched at the end.
+    assert commit_marks == [1, 2]
+    assert conn.rollbacks == 0
+
+
+def test_process_book_does_not_create_chapter_row_when_no_verses_parsed() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+
+    class EmptyScraper(FakeScraper):
+        def discover_chapter_urls_for_book(self, book_order, book_code=None):
+            return {2: "https://example.com/lev/2"}
+
+        def fetch_chapter_payload(self, book_order, chapter_number, chapter_url=None, book_code=None):
+            return ChapterPayload(
+                book_order=book_order,
+                chapter_number=chapter_number,
+                source_url=chapter_url or "",
+                verses=[],
+            )
+
+    scraper = EmptyScraper("https://www.bskorea.or.kr/bible/korbibReadpage.php?version=GAE")
+    book = Book(id=69, book_order=3, book_key="LEV", abbreviation="레", name="레위기")
+
+    try:
+        process_book(repo=repo, conn=conn, scraper=scraper, book=book)
+    except RuntimeError as exc:
+        assert "Parsed 0 verses" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    # Chapter 2 is missing from the map, but nothing was written or committed.
+    assert repo.inserted_chapters == []
+    assert conn.commits == 0
 
 
 BIBLEGATEWAY_WEB_ENTRY_URL = "https://www.biblegateway.com/passage/?search=Genesis%201&version=WEB"

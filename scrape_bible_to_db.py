@@ -361,7 +361,12 @@ def process_book(
     end_chapter: int | None = None,
 ) -> tuple[int, int, int]:
     """
-    Process one book in current transaction.
+    Process one book, committing after each chapter.
+
+    A chapter row and its verses are written in the same transaction, so a failure
+    mid-book leaves completed chapters durable and never leaves a chapter row
+    without verses. Chapters that parse nothing are skipped before any write.
+
     Returns: (chapter_count, inserted_chapter_count, inserted_verse_count)
     """
     logging.info("[BOOK %02d] Start: %s", book.book_order, book.name)
@@ -390,23 +395,12 @@ def process_book(
 
     chapter_map = repo.get_chapter_map(conn, book.id)
     chapter_numbers = sorted(chapter_urls.keys())
-    missing_chapters = [c for c in chapter_numbers if c not in chapter_map]
-    inserted_chapters = repo.insert_missing_chapters(conn, book.id, missing_chapters)
 
-    if missing_chapters:
-        chapter_map = repo.get_chapter_map(conn, book.id)
-
+    inserted_chapters_total = 0
     inserted_verses_total = 0
     parsed_verses_total = 0
 
     for chapter_number in chapter_numbers:
-        chapter_id = chapter_map.get(chapter_number)
-        if chapter_id is None:
-            # Defensive fallback if map is stale.
-            repo.insert_missing_chapters(conn, book.id, [chapter_number])
-            chapter_map = repo.get_chapter_map(conn, book.id)
-            chapter_id = chapter_map[chapter_number]
-
         chapter_url = chapter_urls[chapter_number]
         logging.info(
             "[BOOK %02d][CH %03d] Fetching...",
@@ -414,6 +408,7 @@ def process_book(
             chapter_number,
         )
 
+        # Fetch before touching the DB so a skipped chapter opens no transaction.
         payload = scraper.fetch_chapter_payload(
             book.book_order,
             chapter_number,
@@ -438,10 +433,20 @@ def process_book(
             )
             continue
 
-        parsed_verses_total += len(payload.verses)
+        chapter_id = chapter_map.get(chapter_number)
+        if chapter_id is None:
+            repo.insert_missing_chapters(conn, book.id, [chapter_number])
+            chapter_map = repo.get_chapter_map(conn, book.id)
+            chapter_id = chapter_map[chapter_number]
+            inserted_chapters_total += 1
+
         existing_numbers = repo.get_existing_verse_numbers(conn, chapter_id)
         new_verses = [v for v in payload.verses if v.verse_number not in existing_numbers]
         inserted = repo.insert_missing_verses(conn, chapter_id, new_verses)
+
+        conn.commit()  # chapter-level commit
+
+        parsed_verses_total += len(payload.verses)
         inserted_verses_total += inserted
 
         logging.info(
@@ -457,17 +462,18 @@ def process_book(
         "[BOOK %02d] Done. chapters=%d, inserted_chapters=%d, inserted_verses=%d",
         book.book_order,
         len(chapter_numbers),
-        inserted_chapters,
+        inserted_chapters_total,
         inserted_verses_total,
     )
 
     if parsed_verses_total == 0:
+        # Nothing was committed: every chapter was skipped before its write.
         raise RuntimeError(
             f"[BOOK {book.book_order}] Parsed 0 verses across all chapters; "
-            "aborting commit to avoid storing empty scrape result."
+            "no chapter was committed."
         )
 
-    return len(chapter_numbers), inserted_chapters, inserted_verses_total
+    return len(chapter_numbers), inserted_chapters_total, inserted_verses_total
 
 
 def run() -> int:
@@ -550,14 +556,17 @@ def run() -> int:
                         start_chapter=args.start_chapter,
                         end_chapter=args.end_chapter,
                     )
-                    conn.commit()  # book-level commit
-                    logging.info("[BOOK %02d] COMMIT success", book.book_order)
+                    # process_book() already committed each chapter; this only
+                    # closes the empty transaction left open by the last read.
+                    conn.commit()
+                    logging.info("[BOOK %02d] COMPLETED", book.book_order)
                     completed = True
                     break
                 except Exception:
-                    conn.rollback()  # book-level rollback
+                    # Discards only the in-flight chapter; committed ones stay.
+                    conn.rollback()
                     logging.exception(
-                        "[BOOK %02d] attempt=%d/%d failed, rolled back",
+                        "[BOOK %02d] attempt=%d/%d failed, rolled back in-flight chapter",
                         book.book_order,
                         attempt,
                         args.book_retries,
