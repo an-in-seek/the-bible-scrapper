@@ -43,7 +43,7 @@ scrape_bible_to_db.py   CLI, book loop, retries, commit/rollback, source/transla
 scrape_kjv_to_db.py     Legacy wrapper; delegates to scrape_bible_to_db.run()
 ```
 
-Data flow: read `bible_book` → build per-source chapter URLs → fetch HTML → parse verses → insert only missing chapters/verses → commit per book.
+Data flow: read `bible_book` → build per-source chapter URLs → fetch HTML → parse verses → insert only missing chapters/verses → commit per chapter.
 
 ## Contracts that must hold
 
@@ -51,13 +51,13 @@ Data flow: read `bible_book` → build per-source chapter URLs → fetch HTML �
 
 - **Never create `bible_book` rows.** The tool assumes all 66 books already exist for the target `translation_id` and only reads them. `bible_translation` is read-only as well.
 - `bible_chapter` / `bible_verse` inserts are **missing-only**, so reruns are idempotent. Any change here needs an accompanying idempotency test.
-- The transaction boundary is **per book**. A failure rolls back only that book and retries it; other books are unaffected.
+- The transaction boundary is **per chapter**: a chapter row and its verses commit together. A failure mid-book keeps completed chapters and rolls back only the in-flight one; the retry re-processes the book and skips what already landed. Retries are still counted per book (`--book-retries`).
 - `sync_identity_sequences()` runs at startup to align sequences with `MAX(id)`. Skipping it causes duplicate PK errors.
 
 ### Empty-data guards (intentional failures)
 
-- If a book yields zero parsed verses, `process_book()` raises and **blocks the commit**. This deliberately prevents storing an empty scrape result — do not "fix" it by swallowing the exception.
-- If a chapter's first verse number is not `1`, that chapter is skipped.
+- A chapter that parses zero verses is skipped **before any write**, so no empty chapter row is ever committed. Same for a chapter whose first verse number is not `1`.
+- If a whole book yields zero parsed verses, `process_book()` raises. Nothing was committed at that point, so the book is retried. Do not "fix" this by swallowing the exception.
 
 ### Parser fallback chain
 

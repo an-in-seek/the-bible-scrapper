@@ -550,7 +550,7 @@ Jude 1:25 to God our Savior, who alone is wise, be glory and majesty, dominion a
 - `div.passage-text`가 없음
   - `[]` 반환 후 다음 파서로 위임
 - 절 수가 0개
-  - 파서 실패로 간주. `process_book()`이 책 단위 커밋을 막는다.
+  - 파서 실패로 간주. 해당 장은 DB 쓰기 전에 건너뛰므로 빈 chapter row가 남지 않는다.
 - 첫 절 번호가 1이 아님
   - 기존 적재 로직과 동일하게 경고 후 해당 장 skip
 - 절 번호는 있으나 텍스트가 비어 있음

@@ -17,7 +17,7 @@
 
 - `bible_book`의 기존 row를 조회해 사용하며 book 자체는 생성하지 않습니다.
 - `bible_chapter`, `bible_verse`는 기존 데이터를 재사용하고 없는 데이터만 insert 합니다.
-- 책 단위로 `commit`/`rollback` 하며, 실패 시 책 단위 재시도를 수행합니다.
+- 장 단위로 `commit` 하며, 실패 시 진행 중이던 장만 `rollback` 하고 책 단위로 재시도합니다.
 - 실행 시작 시 `bible_chapter`, `bible_verse`의 ID 시퀀스를 현재 `MAX(id)`에 맞춰 동기화합니다.
 - `.env`를 자동 로드하되, 이미 셸에 설정된 환경변수는 덮어쓰지 않습니다.
 - KJV/NKRV 소스와 번역본 메타데이터가 어긋나면 실행 초기에 오류로 중단합니다.
@@ -151,15 +151,20 @@ BIBLE_LANGUAGE_CODE=ko
 
 1. 대상 `bible_book`을 `book_order ASC`로 조회합니다.
 2. 소스별 규칙으로 chapter URL 목록을 만듭니다.
-3. 기존 `bible_chapter`를 조회하고 없는 chapter만 insert 합니다.
-4. 각 chapter에서 절을 파싱합니다.
+3. 각 chapter를 요청해 절을 파싱합니다.
+4. 파싱에 성공한 chapter만 `bible_chapter` row를 확보합니다.
 5. 기존 `verse_number`를 조회하고 없는 절만 insert 합니다.
-6. 각 책이 끝나면 `commit`, 실패하면 해당 책만 `rollback` 후 재시도합니다.
+6. **각 chapter가 끝날 때마다 `commit`** 합니다.
+7. 실패하면 진행 중이던 chapter만 `rollback` 되고, 책 단위로 재시도합니다.
+
+즉 chapter row와 그 절들은 같은 트랜잭션에서 커밋됩니다.  
+책 도중에 실패해도 이미 끝난 chapter는 보존되며, 재시도 시 기존 절은 건너뜁니다.
 
 ### 안전 장치
 
-- 어떤 chapter에서도 절이 하나도 파싱되지 않으면 해당 책 전체는 커밋하지 않습니다.
+- 절이 하나도 파싱되지 않은 chapter는 **DB에 쓰기 전에** 건너뜁니다. 빈 chapter row가 남지 않습니다.
 - chapter의 첫 절 번호가 `1`이 아니면 해당 chapter insert를 건너뜁니다.
+- 책 전체에서 절을 하나도 얻지 못하면 오류로 처리합니다. 이 시점에는 커밋된 것이 없습니다.
 - 기존 절 번호가 있으면 중복 insert 하지 않습니다.
 
 ## 지원 소스
@@ -400,4 +405,4 @@ CREATE INDEX idx_verse_chapter_id ON bible_verse(chapter_id);
 ### `Parsed 0 verses across all chapters`
 
 - 해당 책에서 유효한 본문을 하나도 추출하지 못한 경우입니다.
-- 빈 스크랩 결과를 커밋하지 않기 위해 의도적으로 실패 처리합니다.
+- 이 시점에는 커밋된 chapter가 없으며, 빈 스크랩 결과를 남기지 않기 위해 의도적으로 실패 처리합니다.
