@@ -10,7 +10,7 @@
 
 설계 문서:
 
-- NKRV: [docs/bskorea_scraping_design.md](docs/bskorea_scraping_design.md)
+- NKRV: [docs/nkrv-scraping-design.md](docs/nkrv-scraping-design.md)
 - WEB: [docs/world-english-bible-scraping-design.md](docs/world-english-bible-scraping-design.md)
 
 ## 주요 특징
@@ -34,7 +34,7 @@
 - `tests/test_db.py`: 번역본 식별 로직 테스트
 - `tests/test_pipeline.py`: 파이프라인/인자 검증 테스트
 - `scripts/run_tests_wsl.sh`: WSL 테스트 실행 스크립트
-- `docs/bskorea_scraping_design.md`: NKRV 설계 문서
+- `docs/nkrv-scraping-design.md`: NKRV 설계 문서
 - `docs/world-english-bible-scraping-design.md`: WEB 설계 문서
 
 ## 요구 사항

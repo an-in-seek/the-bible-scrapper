@@ -16,7 +16,7 @@ Supported sources:
 
 Design documents:
 
-- [docs/bskorea_scraping_design.md](docs/bskorea_scraping_design.md) — NKRV
+- [docs/nkrv-scraping-design.md](docs/nkrv-scraping-design.md) — NKRV
 - [docs/world-english-bible-scraping-design.md](docs/world-english-bible-scraping-design.md) — WEB
 
 ## Common commands
