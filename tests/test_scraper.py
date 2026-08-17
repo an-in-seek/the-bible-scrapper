@@ -484,6 +484,59 @@ def test_parse_verses_from_biblegateway_ignores_other_chapters() -> None:
     assert [verse.verse_number for verse in verses] == [30, 31]
 
 
+def test_parse_verses_from_biblegateway_records_untranslated_verse() -> None:
+    # WEB leaves Acts 8:37 untranslated: the span holds only a footnote marker.
+    html = """
+    <div class="passage-text"><div class="passage-content"><div class="version-WEB">
+      <p>
+        <span class="text Acts-8-36" id="en-WEB-1"><sup class="versenum">36 </sup>They came to some water.</span>
+        <span class="text Acts-8-37" id="en-WEB-2"><sup class="versenum">37 </sup><sup data-fn="#fen-WEB-a" class="footnote">[<a href="#fen-WEB-a">a</a>]</sup></span>
+        <span class="text Acts-8-38" id="en-WEB-3"><sup class="versenum">38 </sup>He commanded the chariot to stand still.</span>
+      </p>
+    </div></div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [36, 37, 38]
+    assert verses[1].text == "(omitted)"
+
+
+def test_parse_verses_from_biblegateway_drops_empty_span_without_footnote() -> None:
+    # Guard: an empty span with no footnote is a parse failure, not an omission.
+    html = """
+    <div class="passage-text"><div class="passage-content"><div class="version-WEB">
+      <p>
+        <span class="text Gen-1-1" id="en-WEB-1"><sup class="versenum">1 </sup>Real verse text.</span>
+        <span class="text Gen-1-2" id="en-WEB-2"><sup class="versenum">2 </sup></span>
+      </p>
+    </div></div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [1]
+
+
+def test_parse_verses_from_biblegateway_prefers_translated_fragment_over_marker() -> None:
+    html = """
+    <div class="passage-text"><div class="passage-content"><div class="version-WEB">
+      <p>
+        <span class="text Luke-17-36"><sup class="versenum">36 </sup><sup class="footnote">[<a href="#a">a</a>]</sup></span>
+        <span class="text Luke-17-36">Actual translated line.</span>
+      </p>
+    </div></div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert verses[0].text == "Actual translated line."
+
+
 def test_biblegateway_parser_returns_empty_for_other_sources() -> None:
     scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
     soup = BeautifulSoup("<div class='bible_read'><p>1 text</p></div>", "html.parser")

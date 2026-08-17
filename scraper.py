@@ -72,14 +72,23 @@ BIBLEGATEWAY_CRAWL_DELAY_SECONDS = 15.0
 # Verse spans carry an "OSIS-chapter-verse" class token, e.g. "Gen-1-1", "1Sam-1-23".
 # The book abbreviation differs from the search name, so only the numbers are used.
 BIBLEGATEWAY_VERSE_CLASS_PATTERN = re.compile(r"^[A-Za-z0-9]+-(\d{1,3})-(\d{1,3})$")
-# Removed before verse extraction. `h4.psalm-title` matters most: BibleGateway tags
-# the psalm superscription with the verse-1 class, so keeping it would prepend
-# "A Psalm by David." to Psalms 23:1.
-BIBLEGATEWAY_REMOVABLE_SELECTOR = (
+# Dropped from the container before verse extraction. `h4.psalm-title` matters most:
+# BibleGateway tags the psalm superscription with the verse-1 class, so keeping it
+# would prepend "A Psalm by David." to Psalms 23:1.
+BIBLEGATEWAY_CONTAINER_REMOVABLE_SELECTOR = (
     "div.footnotes, div.crossrefs, h4.psalm-title, p.psalm-title, h3, "
-    "span.chapternum, sup.versenum, sup.footnote, sup.crossreference, "
     "p.translation-note, a.full-chap-link, div.passage-other-trans"
 )
+# Dropped from each verse span. Kept separate from the container pass so a span can
+# still be inspected for the footnote marker that flags an untranslated verse.
+BIBLEGATEWAY_INLINE_REMOVABLE_SELECTOR = (
+    "span.chapternum, sup.versenum, sup.footnote, sup.crossreference"
+)
+# WEB leaves a few verses untranslated (Luke 17:36, Acts 8:37, 15:34, 24:7): the span
+# exists but holds only a footnote marker. Recorded explicitly so a gap in the stored
+# verse numbers always means a scrape failure, never a translation choice. Mirrors the
+# "(없음)" convention Korean editions use for the same verses.
+BIBLEGATEWAY_OMITTED_VERSE_TEXT = "(omitted)"
 
 
 class RetryableHttpError(RuntimeError):
@@ -842,10 +851,10 @@ class HolyBibleScraper:
 
         # Parallel translations render one container per version; keep the first.
         working = BeautifulSoup(str(container), "html.parser")
-        for removable in working.select(BIBLEGATEWAY_REMOVABLE_SELECTOR):
+        for removable in working.select(BIBLEGATEWAY_CONTAINER_REMOVABLE_SELECTOR):
             removable.decompose()
 
-        fragments: list[tuple[int, int, str]] = []
+        fragments: list[tuple[int, int, str, bool]] = []
         for node in working.select("span.text"):
             if node.find_parent("span", class_="text") is not None:
                 continue
@@ -858,31 +867,45 @@ class HolyBibleScraper:
             if token is None:
                 continue
 
+            has_footnote = node.select_one("sup.footnote") is not None
+            fragment = BeautifulSoup(str(node), "html.parser")
+            for removable in fragment.select(BIBLEGATEWAY_INLINE_REMOVABLE_SELECTOR):
+                removable.decompose()
+
             # Keep source whitespace: an explicit separator would inject spaces
             # around inline markup such as removed footnote markers.
-            text = self._normalize_text(node.get_text(""))
+            text = self._normalize_text(fragment.get_text(""))
+            is_omitted = False
             if not text:
-                continue
+                # Only a footnote marker means WEB does not translate this verse.
+                # Anything else that parses empty is treated as a parse failure so a
+                # DOM change cannot silently fill the book with placeholders.
+                if not has_footnote:
+                    continue
+                text = BIBLEGATEWAY_OMITTED_VERSE_TEXT
+                is_omitted = True
 
-            fragments.append((int(token.group(1)), int(token.group(2)), text))
+            fragments.append((int(token.group(1)), int(token.group(2)), text, is_omitted))
 
         if not fragments:
             return []
 
-        dominant_chapter = Counter(chapter for chapter, _, _ in fragments).most_common(1)[0][0]
+        dominant_chapter = Counter(chapter for chapter, _, _, _ in fragments).most_common(1)[0][0]
 
         # A single verse is split across several spans in poetry blocks
         # (Psalms 23:4 spans four), so fragments are joined, not deduplicated.
-        merged: dict[int, list[str]] = {}
-        for chapter, verse_number, text in fragments:
+        merged: dict[int, list[tuple[str, bool]]] = {}
+        for chapter, verse_number, text, is_omitted in fragments:
             if chapter != dominant_chapter:
                 continue
-            merged.setdefault(verse_number, []).append(text)
+            merged.setdefault(verse_number, []).append((text, is_omitted))
 
-        return [
-            Verse(verse_number=verse_number, text=" ".join(parts))
-            for verse_number, parts in sorted(merged.items())
-        ]
+        verses: list[Verse] = []
+        for verse_number, parts in sorted(merged.items()):
+            translated = [text for text, is_omitted in parts if not is_omitted]
+            text = " ".join(translated) if translated else BIBLEGATEWAY_OMITTED_VERSE_TEXT
+            verses.append(Verse(verse_number=verse_number, text=text))
+        return verses
 
     def _extract_verses_from_bibletable(self, soup: BeautifulSoup) -> list[Verse]:
         """
