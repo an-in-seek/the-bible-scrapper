@@ -12,7 +12,7 @@ Supported sources:
 | --- | --- | --- |
 | `thekingsbible.com` | KJV | Implemented |
 | `bskorea.or.kr` (`version=GAE`) | NKRV | Implemented |
-| `biblegateway.com` (`version=WEB`) | WEB (World English Bible) | Designed, not implemented |
+| `biblegateway.com` (`version=WEB`) | WEB (World English Bible) | Implemented |
 
 Design documents:
 
@@ -64,12 +64,13 @@ Data flow: read `bible_book` → build per-source chapter URLs → fetch HTML �
 `HolyBibleScraper._extract_verses()` is an ordered chain:
 
 ```
-bskorea → (biblegateway) → bibletable → chapter-prefixed → ordered list → structured nodes → regex fallback
+bskorea → biblegateway → bibletable → chapter-prefixed → ordered list → structured nodes → regex fallback
 ```
 
 - **Source-specific parsers go first, generic inference parsers last.** If `_extract_verses_from_structured_nodes()` runs first, it misreads menus, footnotes, and dropdown text as verses.
 - A source-specific parser must **return `[]`** when the page is not its source, so the chain can continue. It must not raise.
 - `_extract_verses_from_bskorea_read_page()` calls `get_text("")` with no separator on purpose. Using `" "` splits Korean particles (e.g. `모세가` becomes `모세 가`).
+- `_extract_verses_from_biblegateway_passage()` reads verse numbers from the `span.text` **class token** (`Gen-2-1`), never from the rendered number: the first verse of a chapter displays the *chapter* number, so Genesis 2:1 would be stored as verse 2. It also merges same-numbered spans instead of deduplicating them (Psalms 23:4 arrives in four fragments) and drops `h4.psalm-title`, which carries the verse-1 class.
 
 ### Adding a new source
 
@@ -94,6 +95,7 @@ Skipping step 7 lets, for example, WEB text land under the KJV translation — e
 - `.env` is loaded with `os.environ.setdefault()`, so **shell environment variables win**.
 - Translation resolution order: `BIBLE_TRANSLATION_ID` → lookup by (`BIBLE_TRANSLATION_TYPE`, `BIBLE_TRANSLATION_NAME`, `BIBLE_LANGUAGE_CODE`) → legacy default `translation_id=10`.
 - That **legacy fallback of 10 is a trap**: with no variables set, data is silently written to translation 10.
+- Entry URL comes from `KJV_ENTRY_URL` / `NKRV_ENTRY_URL` / `WEB_ENTRY_URL`. `BIBLE_LANGUAGE_CODE=en` no longer identifies a source on its own — if both KJV and WEB URLs are set, resolution raises rather than guessing.
 - Never hardcode DB credentials (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`).
 
 ### CLI argument constraints
@@ -119,4 +121,5 @@ Skipping step 7 lets, for example, WEB text land under the KJV translation — e
 ## Scraping etiquette
 
 - Keep the polite per-request delay and the 5-second gap between books. Do not bypass the 429/5xx retry and throttle-multiplier logic.
+- BibleGateway declares `Crawl-delay: 15`, enforced as a floor in `HolyBibleScraper.__init__` (`BIBLEGATEWAY_CRAWL_DELAY_SECONDS`). **Do not lower it** — a full 66-book load is meant to take ~5 hours.
 - Check the target site's `robots.txt` and terms of use before adding a new source.

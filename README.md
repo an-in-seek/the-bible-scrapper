@@ -2,12 +2,16 @@
 
 성경 본문을 스크래핑해 PostgreSQL의 `bible_chapter`, `bible_verse`에 적재하는 도구입니다.
 
-현재 기준으로 안정적으로 맞춰진 소스는 아래 2개입니다.
+현재 기준으로 안정적으로 맞춰진 소스는 아래 3개입니다.
 
 - `thekingsbible.com` KJV
 - `bskorea.or.kr` NKRV(`version=GAE`)
+- `biblegateway.com` WEB(`version=WEB`, World English Bible)
 
-NKRV 설계 문서는 [docs/bskorea_scraping_design.md](docs/bskorea_scraping_design.md)에 있습니다.
+설계 문서:
+
+- NKRV: [docs/bskorea_scraping_design.md](docs/bskorea_scraping_design.md)
+- WEB: [docs/world-english-bible-scraping-design.md](docs/world-english-bible-scraping-design.md)
 
 ## 주요 특징
 
@@ -31,6 +35,7 @@ NKRV 설계 문서는 [docs/bskorea_scraping_design.md](docs/bskorea_scraping_de
 - `tests/test_pipeline.py`: 파이프라인/인자 검증 테스트
 - `scripts/run_tests_wsl.sh`: WSL 테스트 실행 스크립트
 - `docs/bskorea_scraping_design.md`: NKRV 설계 문서
+- `docs/world-english-bible-scraping-design.md`: WEB 설계 문서
 
 ## 요구 사항
 
@@ -75,20 +80,23 @@ DB_PASSWORD=your_password
 ```env
 KJV_ENTRY_URL=https://thekingsbible.com/Bible/1/1
 NKRV_ENTRY_URL=https://www.bskorea.or.kr/bible/korbibReadpage.php?version=GAE&book=gen&chap=1&sec=1&cVersion=&fontSize=15px&fontWeight=normal
+WEB_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=WEB
 ```
 
 `--entry-url`를 지정하지 않으면 기본 URL은 아래 순서로 결정됩니다.
 
-1. `KJV_ENTRY_URL`와 `NKRV_ENTRY_URL`가 둘 다 있으면 번역본 힌트에 따라 선택
-2. 둘 중 하나만 있으면 그 값을 사용
-3. 둘 다 없으면 내장 기본값 `https://thekingsbible.com/Bible/1/1` 사용
+1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB`)에 해당하는 환경변수
+2. `BIBLE_TRANSLATION_ID=2` 또는 `BIBLE_TRANSLATION_NAME=개역개정`이면 `NKRV_ENTRY_URL`
+3. `BIBLE_LANGUAGE_CODE`로 좁혀지는 소스가 하나면 그 값
+   - `ko` -> `NKRV_ENTRY_URL`
+   - `en` -> `KJV_ENTRY_URL` 또는 `WEB_ENTRY_URL` 중 설정된 것
+4. 설정된 엔트리 URL이 하나뿐이면 그 값
+5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` 순으로 선택
+6. 아무것도 없으면 내장 기본값 `https://thekingsbible.com/Bible/1/1` 사용
 
-번역본 힌트는 아래 값으로 판단합니다.
-
-- NKRV 힌트: `BIBLE_TRANSLATION_ID=2`, `BIBLE_TRANSLATION_TYPE=NKRV`, `BIBLE_LANGUAGE_CODE=ko`
-- KJV 힌트: `BIBLE_TRANSLATION_TYPE=KJV`, `BIBLE_LANGUAGE_CODE=en`
-
-둘 다 모호하면 NKRV URL을 우선 선택합니다.
+주의: `BIBLE_LANGUAGE_CODE=en`은 더 이상 KJV를 단독으로 지시하지 않습니다.  
+`KJV_ENTRY_URL`과 `WEB_ENTRY_URL`이 함께 설정된 상태에서 `en`만 주면 실행이 중단됩니다.  
+이때는 `BIBLE_TRANSLATION_TYPE`을 지정하거나 `--entry-url`을 명시해야 합니다.
 
 ### 번역본 선택
 
@@ -185,6 +193,31 @@ NKRV_ENTRY_URL=https://www.bskorea.or.kr/bible/korbibReadpage.php?version=GAE&bo
 - 레위기 27장: `https://www.bskorea.or.kr/bible/korbibReadpage.php?version=GAE&book=lev&chap=27&sec=1&cVersion=&fontSize=15px&fontWeight=normal`
 - 민수기 1장: `https://www.bskorea.or.kr/bible/korbibReadpage.php?version=GAE&book=num&chap=1&sec=1&cVersion=&fontSize=15px&fontWeight=normal`
 
+### 3. WEB `biblegateway.com`
+
+- URL 규칙: `https://www.biblegateway.com/passage/?search={영문 책명}%20{장 번호}&version=WEB`
+- 책명은 코드 내 66권 영문 책명 상수를 사용합니다. `bible_book.book_key`는 사용하지 않습니다.
+- 장 수는 KJV와 동일한 정경 66권 chapter count를 사용합니다.
+- `version`은 엔트리 URL의 값을 승계하며, 없으면 `WEB`입니다.
+
+권장 엔트리 URL:
+
+```env
+WEB_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=WEB
+```
+
+예:
+
+- 창세기 1장: `https://www.biblegateway.com/passage/?search=Genesis%201&version=WEB`
+- 사무엘상 1장: `https://www.biblegateway.com/passage/?search=1%20Samuel%201&version=WEB`
+- 유다서: `https://www.biblegateway.com/passage/?search=Jude%201&version=WEB`
+
+저장 규칙:
+
+- 절 번호는 화면 표시 숫자가 아니라 `span.text`의 클래스 토큰(`Gen-2-1`)에서 읽습니다.
+- 각주(`[a]`), 상호 참조(`(A)`), 시편 표제(`A Psalm by David.`)는 절 본문에 포함하지 않습니다.
+- 시가 본문에서 여러 조각으로 나뉜 절은 하나로 병합합니다.
+
 ## 네트워크와 재시도
 
 - `429`, `502`, `503`, `504` 응답은 자동 재시도합니다.
@@ -192,6 +225,9 @@ NKRV_ENTRY_URL=https://www.bskorea.or.kr/bible/korbibReadpage.php?version=GAE&bo
 - 본문에 `Too Many Requests`, `429 Error` 같은 마커가 있는 200 응답도 재시도 대상으로 처리합니다.
 - 요청 성공 후에는 throttle을 서서히 낮추고, 실패가 누적되면 요청 간 대기 시간을 늘립니다.
 - chapter 간에는 scraper 내부의 polite delay가 적용되고, book 간에는 추가로 5초 대기합니다.
+- BibleGateway는 `robots.txt`에 `Crawl-delay: 15`를 명시하므로, 이 소스에서는 요청 간격 하한이 15초로 강제됩니다.
+  - 생성자에 더 짧은 값을 넘겨도 15초 미만으로 내려가지 않습니다.
+  - 66권 전권 적재는 1,189 요청이며 약 5시간이 걸립니다.
 
 ## 실행 방법
 
@@ -284,6 +320,27 @@ export NKRV_ENTRY_URL="https://www.bskorea.or.kr/bible/korbibReadpage.php?versio
 python3 scrape_bible_to_db.py --test-book 3 --test-chapter 11
 ```
 
+### WEB 실행
+
+```bash
+export BIBLE_TRANSLATION_TYPE=WEB
+export BIBLE_TRANSLATION_NAME="World English Bible"
+export BIBLE_LANGUAGE_CODE=en
+export WEB_ENTRY_URL="https://www.biblegateway.com/passage/?search=Genesis%201&version=WEB"
+python3 scrape_bible_to_db.py --start-book 1 --end-book 5
+```
+
+### WEB smoke test
+
+```bash
+export WEB_ENTRY_URL="https://www.biblegateway.com/passage/?search=Genesis%201&version=WEB"
+python3 scrape_bible_to_db.py --test-genesis1
+python3 scrape_bible_to_db.py --test-book 19 --test-chapter 119
+python3 scrape_bible_to_db.py --test-book 65 --test-chapter 1
+```
+
+전권 적재 구간 분할과 완료 검증 쿼리는 [설계 문서 11절](docs/world-english-bible-scraping-design.md)에 있습니다.
+
 ## 테스트
 
 ### 기본 실행
@@ -331,8 +388,14 @@ CREATE INDEX idx_verse_chapter_id ON bible_verse(chapter_id);
 
 ### `Source/translation mismatch`
 
-- `thekingsbible.com`에 NKRV 번역본 메타데이터를 붙였거나
-- `bskorea.or.kr?version=GAE`에 KJV 메타데이터를 붙인 경우입니다.
+- `thekingsbible.com`에 NKRV/WEB 번역본 메타데이터를 붙였거나
+- `bskorea.or.kr?version=GAE`에 KJV/WEB 메타데이터를 붙였거나
+- `biblegateway.com?version=WEB`에 KJV/NKRV 메타데이터를 붙인 경우입니다.
+
+### `Ambiguous entry URL`
+
+- `KJV_ENTRY_URL`과 `WEB_ENTRY_URL`이 함께 설정된 상태에서 `BIBLE_LANGUAGE_CODE=en`만 준 경우입니다.
+- `BIBLE_TRANSLATION_TYPE`을 지정하거나 `--entry-url`을 명시하면 해결됩니다.
 
 ### `Parsed 0 verses across all chapters`
 
