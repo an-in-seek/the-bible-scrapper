@@ -15,42 +15,79 @@ from scraper import DEFAULT_ENTRY_URL, HolyBibleScraper
 BOOK_TRANSITION_DELAY_SECONDS = 5
 
 
-def _is_nkrv_translation_hint() -> bool | None:
-    translation_id = os.getenv("BIBLE_TRANSLATION_ID")
-    translation_type = (os.getenv("BIBLE_TRANSLATION_TYPE") or "").strip().upper()
-    translation_name = (os.getenv("BIBLE_TRANSLATION_NAME") or "").strip()
-    language_code = (os.getenv("BIBLE_LANGUAGE_CODE") or "").strip().lower()
+ENTRY_URL_ENV_BY_TRANSLATION_TYPE = {
+    "KJV": "KJV_ENTRY_URL",
+    "NKRV": "NKRV_ENTRY_URL",
+    "WEB": "WEB_ENTRY_URL",
+}
+# A language code alone no longer identifies a source: 'en' now covers KJV and WEB.
+TRANSLATION_TYPES_BY_LANGUAGE_CODE = {
+    "ko": ("NKRV",),
+    "en": ("KJV", "WEB"),
+}
+LEGACY_TRANSLATION_TYPE_BY_ID = {"2": "NKRV"}
+# Tie-break when nothing else narrows it down; keeps the pre-WEB default.
+ENTRY_URL_PREFERENCE_ORDER = ("NKRV", "KJV", "WEB")
 
-    if (
-        translation_id == "2"
-        or translation_type == "NKRV"
-        or translation_name == "개역개정"
-        or language_code == "ko"
-    ):
-        return True
 
-    if (
-        translation_type == "KJV"
-        or language_code == "en"
-    ):
-        return False
+def _configured_entry_urls() -> dict[str, str]:
+    configured: dict[str, str] = {}
+    for translation_type, env_name in ENTRY_URL_ENV_BY_TRANSLATION_TYPE.items():
+        value = os.getenv(env_name)
+        if value:
+            configured[translation_type] = value
+    return configured
+
+
+def _translation_type_hint() -> str | None:
+    declared = (os.getenv("BIBLE_TRANSLATION_TYPE") or "").strip().upper()
+    if declared in ENTRY_URL_ENV_BY_TRANSLATION_TYPE:
+        return declared
+
+    translation_id = (os.getenv("BIBLE_TRANSLATION_ID") or "").strip()
+    if translation_id in LEGACY_TRANSLATION_TYPE_BY_ID:
+        return LEGACY_TRANSLATION_TYPE_BY_ID[translation_id]
+
+    if (os.getenv("BIBLE_TRANSLATION_NAME") or "").strip() == "개역개정":
+        return "NKRV"
 
     return None
 
 
 def resolve_default_entry_url() -> str:
-    kjv_entry_url = os.getenv("KJV_ENTRY_URL")
-    nkrv_entry_url = os.getenv("NKRV_ENTRY_URL")
+    configured = _configured_entry_urls()
+    if not configured:
+        return DEFAULT_ENTRY_URL
 
-    if kjv_entry_url and nkrv_entry_url:
-        nkrv_hint = _is_nkrv_translation_hint()
-        if nkrv_hint is True:
-            return nkrv_entry_url
-        if nkrv_hint is False:
-            return kjv_entry_url
-        return nkrv_entry_url
+    hint = _translation_type_hint()
+    if hint is not None and hint in configured:
+        return configured[hint]
 
-    return kjv_entry_url or nkrv_entry_url or DEFAULT_ENTRY_URL
+    language_code = (os.getenv("BIBLE_LANGUAGE_CODE") or "").strip().lower()
+    by_language = [
+        translation_type
+        for translation_type in TRANSLATION_TYPES_BY_LANGUAGE_CODE.get(language_code, ())
+        if translation_type in configured
+    ]
+    if len(by_language) == 1:
+        return configured[by_language[0]]
+    if len(by_language) > 1:
+        env_names = ", ".join(
+            ENTRY_URL_ENV_BY_TRANSLATION_TYPE[translation_type] for translation_type in by_language
+        )
+        raise ValueError(
+            f"Ambiguous entry URL: BIBLE_LANGUAGE_CODE={language_code!r} matches {env_names}. "
+            "Set BIBLE_TRANSLATION_TYPE or pass --entry-url explicitly."
+        )
+
+    if len(configured) == 1:
+        return next(iter(configured.values()))
+
+    for translation_type in ENTRY_URL_PREFERENCE_ORDER:
+        if translation_type in configured:
+            return configured[translation_type]
+
+    return DEFAULT_ENTRY_URL
 
 
 def configure_logging(verbose: bool = False) -> None:
@@ -112,8 +149,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--entry-url",
-        default=resolve_default_entry_url(),
-        help="Source entry URL (default: env KJV_ENTRY_URL, NKRV_ENTRY_URL, or built-in default)",
+        default=None,
+        help=(
+            "Source entry URL "
+            "(default: env KJV_ENTRY_URL, NKRV_ENTRY_URL, WEB_ENTRY_URL, or built-in default)"
+        ),
     )
     parser.add_argument(
         "--book-retries",
@@ -241,11 +281,27 @@ def validate_source_translation_compatibility(
             f"Resolved translation metadata={metadata}"
         )
 
+    if source_name == "biblegateway" and query_params.get("version") == "WEB":
+        if translation_type == "WEB":
+            return
+        if translation_name == "World English Bible" and language_code == "en":
+            logging.warning(
+                "Translation metadata matched WEB by name/language but translation_type was %r",
+                translation_type,
+            )
+            return
+        raise RuntimeError(
+            "Source/translation mismatch: biblegateway WEB source requires "
+            "translation_type='WEB' (preferred), or at minimum name='World English Bible' "
+            "and language_code='en'. "
+            f"Resolved translation metadata={metadata}"
+        )
+
     if source_name == "thekingsbible":
-        if translation_type == "NKRV":
+        if translation_type in ("NKRV", "WEB"):
             raise RuntimeError(
                 "Source/translation mismatch: thekingsbible source cannot be used with "
-                "translation_type='NKRV'. "
+                f"translation_type={translation_type!r}. "
                 f"Resolved translation metadata={metadata}"
             )
         if translation_type == "" and translation_name == "개역개정" and language_code == "ko":
@@ -255,9 +311,30 @@ def validate_source_translation_compatibility(
                 f"Resolved translation metadata={metadata}"
             )
 
+    if source_name == "bskorea" and translation_type == "WEB":
+        raise RuntimeError(
+            "Source/translation mismatch: bskorea source cannot be used with "
+            "translation_type='WEB'. "
+            f"Resolved translation metadata={metadata}"
+        )
+
+    if source_name == "biblegateway" and translation_type in ("KJV", "NKRV"):
+        raise RuntimeError(
+            "Source/translation mismatch: biblegateway source cannot be used with "
+            f"translation_type={translation_type!r}. "
+            f"Resolved translation metadata={metadata}"
+        )
+
 
 def resolve_book_code_for_source(scraper: HolyBibleScraper, book: Book) -> str | None:
-    if scraper.get_source_name() != "bskorea":
+    source_name = scraper.get_source_name()
+
+    if source_name == "biblegateway":
+        # BibleGateway expects a readable book name ("1 Samuel"), not a key like
+        # "1SA", so the constant table wins over bible_book.book_key here.
+        return scraper._get_biblegateway_book_name(book.book_order)
+
+    if source_name != "bskorea":
         return None
 
     candidate = (book.book_key or "").strip().lower()
@@ -410,11 +487,13 @@ def run() -> int:
             end_chapter=args.end_chapter,
         )
         validate_test_target_args(args.test_book, args.test_chapter)
+        # Resolved after parsing so an explicit --entry-url skips resolution entirely.
+        entry_url = args.entry_url or resolve_default_entry_url()
     except ValueError as exc:
         logging.error(str(exc))
         return 2
 
-    scraper = HolyBibleScraper(entry_url=args.entry_url)
+    scraper = HolyBibleScraper(entry_url=entry_url)
 
     # Smoke test path should not require DB connection.
     if args.test_genesis1 or args.test_book is not None:

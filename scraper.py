@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Iterable
-from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
+from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlparse, urlunparse
 
 import requests
 from bs4 import BeautifulSoup, Tag
@@ -26,6 +26,11 @@ DEFAULT_BSKOREA_NKRV_ENTRY_URL = (
     "https://www.bskorea.or.kr/bible/korbibReadpage.php"
     "?version=GAE&book=gen&chap=1&sec=1&cVersion=&fontSize=15px&fontWeight=normal"
 )
+DEFAULT_BIBLEGATEWAY_WEB_ENTRY_URL = (
+    "https://www.biblegateway.com/passage/?search=Genesis%201&version=WEB"
+)
+DEFAULT_BIBLEGATEWAY_BASE_URL = "https://www.biblegateway.com/passage/"
+DEFAULT_BIBLEGATEWAY_VERSION = "WEB"
 # 1-based chapter counts for Genesis..Revelation (66 books).
 KJV_CHAPTER_COUNTS: tuple[int, ...] = (
     50, 40, 27, 36, 34, 24, 21, 4, 31, 24, 22, 25, 29, 36, 10, 13, 10, 42, 150,
@@ -46,6 +51,34 @@ BSKOREA_BOOK_CODES: tuple[str, ...] = (
     "hag", "zec", "mal", "mat", "mrk", "luk", "jhn", "act", "rom", "1co", "2co", "gal",
     "eph", "php", "col", "1th", "2th", "1ti", "2ti", "tit", "phm", "heb", "jas", "1pe",
     "2pe", "1jn", "2jn", "3jn", "jud", "rev",
+)
+# Book names accepted by the BibleGateway `search` query parameter.
+BIBLEGATEWAY_BOOK_NAMES: tuple[str, ...] = (
+    "Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Joshua", "Judges",
+    "Ruth", "1 Samuel", "2 Samuel", "1 Kings", "2 Kings", "1 Chronicles",
+    "2 Chronicles", "Ezra", "Nehemiah", "Esther", "Job", "Psalms", "Proverbs",
+    "Ecclesiastes", "Song of Solomon", "Isaiah", "Jeremiah", "Lamentations",
+    "Ezekiel", "Daniel", "Hosea", "Joel", "Amos", "Obadiah", "Jonah", "Micah",
+    "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi", "Matthew",
+    "Mark", "Luke", "John", "Acts", "Romans", "1 Corinthians", "2 Corinthians",
+    "Galatians", "Ephesians", "Philippians", "Colossians", "1 Thessalonians",
+    "2 Thessalonians", "1 Timothy", "2 Timothy", "Titus", "Philemon", "Hebrews",
+    "James", "1 Peter", "2 Peter", "1 John", "2 John", "3 John", "Jude",
+    "Revelation",
+)
+# biblegateway.com/robots.txt declares "Crawl-delay: 15" for all user agents.
+# Enforced as a floor in __init__ so it cannot be lowered by mistake.
+BIBLEGATEWAY_CRAWL_DELAY_SECONDS = 15.0
+# Verse spans carry an "OSIS-chapter-verse" class token, e.g. "Gen-1-1", "1Sam-1-23".
+# The book abbreviation differs from the search name, so only the numbers are used.
+BIBLEGATEWAY_VERSE_CLASS_PATTERN = re.compile(r"^[A-Za-z0-9]+-(\d{1,3})-(\d{1,3})$")
+# Removed before verse extraction. `h4.psalm-title` matters most: BibleGateway tags
+# the psalm superscription with the verse-1 class, so keeping it would prepend
+# "A Psalm by David." to Psalms 23:1.
+BIBLEGATEWAY_REMOVABLE_SELECTOR = (
+    "div.footnotes, div.crossrefs, h4.psalm-title, p.psalm-title, h3, "
+    "span.chapternum, sup.versenum, sup.footnote, sup.crossreference, "
+    "p.translation-note, a.full-chap-link, div.passage-other-trans"
 )
 
 
@@ -76,6 +109,12 @@ class HolyBibleScraper:
         self.sleep_min = sleep_min
         self.sleep_max = sleep_max
         self.max_discovery_pages = max_discovery_pages
+
+        # Honor the source's declared crawl delay regardless of caller-supplied values.
+        if self._is_biblegateway_source():
+            self.sleep_min = max(self.sleep_min, BIBLEGATEWAY_CRAWL_DELAY_SECONDS)
+            self.sleep_max = max(self.sleep_max, BIBLEGATEWAY_CRAWL_DELAY_SECONDS + 3.0)
+
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": DEFAULT_USER_AGENT})
         self._throttle_multiplier = 1.0
@@ -92,6 +131,8 @@ class HolyBibleScraper:
             return "thekingsbible"
         if self._is_bskorea_source():
             return "bskorea"
+        if self._is_biblegateway_source():
+            return "biblegateway"
         return "generic"
 
     def parse_verses_from_html(self, html: str) -> list[Verse]:
@@ -401,6 +442,11 @@ class HolyBibleScraper:
         host = parsed.netloc.lower()
         return ("bskorea.or.kr" in host) or parsed.path.endswith("korbibReadpage.php")
 
+    def _is_biblegateway_source(self) -> bool:
+        parsed = urlparse(self.entry_url or "")
+        host = parsed.netloc.lower()
+        return ("biblegateway.com" in host) or parsed.path.rstrip("/").endswith("/passage")
+
     def _build_thekingsbible_url(self, book_order: int, chapter_number: int) -> str:
         # thekingsbible KJV rule:
         # Genesis 1 -> /Bible/1/1, Exodus 1 -> /Bible/2/1 ...
@@ -440,6 +486,33 @@ class HolyBibleScraper:
         return f"{base_url}?{urlencode(query_params, doseq=True)}"
 
     @staticmethod
+    def _get_biblegateway_book_name(book_order: int) -> str | None:
+        if 1 <= book_order <= len(BIBLEGATEWAY_BOOK_NAMES):
+            return BIBLEGATEWAY_BOOK_NAMES[book_order - 1]
+        return None
+
+    def _build_biblegateway_url(
+        self,
+        book_order: int,
+        chapter_number: int,
+        book_code: str | None = None,
+    ) -> str:
+        book_name = book_code or self._get_biblegateway_book_name(book_order)
+        if book_name is None:
+            raise ValueError(f"Invalid biblegateway book order: {book_order}")
+
+        parsed = urlparse(self.entry_url or DEFAULT_BIBLEGATEWAY_WEB_ENTRY_URL)
+        path = parsed.path or "/passage/"
+        base_url = urlunparse(parsed._replace(path=path, params="", query="", fragment=""))
+
+        entry_params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        version = entry_params.get("version") or DEFAULT_BIBLEGATEWAY_VERSION
+
+        # quote() keeps the observed "%20" form; urlencode() would emit "+".
+        search = quote(f"{book_name} {chapter_number}")
+        return f"{base_url}?search={search}&version={quote(version)}"
+
+    @staticmethod
     def _get_kjv_chapter_count(book_order: int) -> int | None:
         if 1 <= book_order <= len(KJV_CHAPTER_COUNTS):
             return KJV_CHAPTER_COUNTS[book_order - 1]
@@ -475,6 +548,8 @@ class HolyBibleScraper:
             return self._build_thekingsbible_url(book_order, chapter_number)
         if self._is_bskorea_source():
             return self._build_bskorea_url(book_order, chapter_number, book_code=book_code)
+        if self._is_biblegateway_source():
+            return self._build_biblegateway_url(book_order, chapter_number, book_code=book_code)
         template = self._ensure_navigation_template()
         return self._build_chapter_url_from_template(template, book_order, chapter_number)
 
@@ -520,6 +595,13 @@ class HolyBibleScraper:
             return chapter_urls
         if self._is_bskorea_source():
             chapter_urls = self._discover_chapter_urls_for_bskorea(book_order, book_code=book_code)
+            self._chapter_url_cache[book_order] = chapter_urls
+            return chapter_urls
+        if self._is_biblegateway_source():
+            chapter_urls = self._discover_chapter_urls_for_biblegateway(
+                book_order,
+                book_code=book_code,
+            )
             self._chapter_url_cache[book_order] = chapter_urls
             return chapter_urls
 
@@ -601,6 +683,20 @@ class HolyBibleScraper:
             for chapter_num in range(1, chapter_count + 1)
         }
 
+    def _discover_chapter_urls_for_biblegateway(
+        self,
+        book_order: int,
+        book_code: str | None = None,
+    ) -> dict[int, str]:
+        chapter_count = self._get_kjv_chapter_count(book_order)
+        if chapter_count is None:
+            return {}
+
+        return {
+            chapter_num: self._build_biblegateway_url(book_order, chapter_num, book_code=book_code)
+            for chapter_num in range(1, chapter_count + 1)
+        }
+
     def fetch_chapter_payload(
         self,
         book_order: int,
@@ -629,6 +725,12 @@ class HolyBibleScraper:
         bskorea_verses = self._extract_verses_from_bskorea_read_page(soup)
         if bskorea_verses:
             return bskorea_verses
+
+        # Must run before the generic parsers: they would read BibleGateway
+        # footnotes and navigation labels as verses.
+        biblegateway_verses = self._extract_verses_from_biblegateway_passage(soup)
+        if biblegateway_verses:
+            return biblegateway_verses
 
         bibletable_verses = self._extract_verses_from_bibletable(soup)
         if bibletable_verses:
@@ -724,6 +826,63 @@ class HolyBibleScraper:
 
         verses.sort(key=lambda verse: verse.verse_number)
         return verses
+
+    def _extract_verses_from_biblegateway_passage(self, soup: BeautifulSoup) -> list[Verse]:
+        """
+        Parse a BibleGateway passage page:
+          <div class="passage-text">...<span class="text Gen-1-1">...</span>...</div>
+
+        Verse numbers come from the class token, never from the rendered number:
+        the first verse of a chapter displays the *chapter* number via
+        `span.chapternum`, so Genesis 2:1 would otherwise be stored as verse 2.
+        """
+        container = soup.select_one("div.passage-text")
+        if container is None:
+            return []
+
+        # Parallel translations render one container per version; keep the first.
+        working = BeautifulSoup(str(container), "html.parser")
+        for removable in working.select(BIBLEGATEWAY_REMOVABLE_SELECTOR):
+            removable.decompose()
+
+        fragments: list[tuple[int, int, str]] = []
+        for node in working.select("span.text"):
+            if node.find_parent("span", class_="text") is not None:
+                continue
+
+            token = None
+            for css_class in node.get("class", []):
+                token = BIBLEGATEWAY_VERSE_CLASS_PATTERN.match(css_class)
+                if token:
+                    break
+            if token is None:
+                continue
+
+            # Keep source whitespace: an explicit separator would inject spaces
+            # around inline markup such as removed footnote markers.
+            text = self._normalize_text(node.get_text(""))
+            if not text:
+                continue
+
+            fragments.append((int(token.group(1)), int(token.group(2)), text))
+
+        if not fragments:
+            return []
+
+        dominant_chapter = Counter(chapter for chapter, _, _ in fragments).most_common(1)[0][0]
+
+        # A single verse is split across several spans in poetry blocks
+        # (Psalms 23:4 spans four), so fragments are joined, not deduplicated.
+        merged: dict[int, list[str]] = {}
+        for chapter, verse_number, text in fragments:
+            if chapter != dominant_chapter:
+                continue
+            merged.setdefault(verse_number, []).append(text)
+
+        return [
+            Verse(verse_number=verse_number, text=" ".join(parts))
+            for verse_number, parts in sorted(merged.items())
+        ]
 
     def _extract_verses_from_bibletable(self, soup: BeautifulSoup) -> list[Verse]:
         """

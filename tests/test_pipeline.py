@@ -248,6 +248,157 @@ def test_process_book_reuses_existing_and_inserts_missing_using_book_key() -> No
     assert [verse.verse_number for verse in repo.inserted_verses[1][1]] == [1]
 
 
+BIBLEGATEWAY_WEB_ENTRY_URL = "https://www.biblegateway.com/passage/?search=Genesis%201&version=WEB"
+
+WEB_TRANSLATION_METADATA = {
+    "id": 3,
+    "language_code": "en",
+    "name": "World English Bible",
+    "translation_type": "WEB",
+}
+
+ENTRY_URL_ENV_KEYS = (
+    "KJV_ENTRY_URL",
+    "NKRV_ENTRY_URL",
+    "WEB_ENTRY_URL",
+    "BIBLE_TRANSLATION_ID",
+    "BIBLE_TRANSLATION_TYPE",
+    "BIBLE_TRANSLATION_NAME",
+    "BIBLE_LANGUAGE_CODE",
+)
+
+
+class BibleGatewayScraper(FakeScraper):
+    def get_source_name(self) -> str:
+        return "biblegateway"
+
+    def _get_biblegateway_book_name(self, book_order: int) -> str | None:
+        return {1: "Genesis", 9: "1 Samuel"}.get(book_order)
+
+
+def _with_entry_url_env(overrides: dict[str, str]):
+    """Context helper: apply env overrides, clearing every entry-url related key first."""
+
+    class _Scope:
+        def __enter__(self) -> None:
+            self.original = {key: os.getenv(key) for key in ENTRY_URL_ENV_KEYS}
+            for key in ENTRY_URL_ENV_KEYS:
+                os.environ.pop(key, None)
+            os.environ.update(overrides)
+
+        def __exit__(self, *_exc: object) -> None:
+            for key, value in self.original.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    return _Scope()
+
+
+def test_resolve_default_entry_url_uses_web_entry_url_when_only_one_configured() -> None:
+    with _with_entry_url_env({"WEB_ENTRY_URL": BIBLEGATEWAY_WEB_ENTRY_URL}):
+        assert resolve_default_entry_url() == BIBLEGATEWAY_WEB_ENTRY_URL
+
+
+def test_resolve_default_entry_url_prefers_web_when_translation_type_is_web() -> None:
+    with _with_entry_url_env(
+        {
+            "KJV_ENTRY_URL": "https://thekingsbible.com/Bible/1/1",
+            "WEB_ENTRY_URL": BIBLEGATEWAY_WEB_ENTRY_URL,
+            "BIBLE_TRANSLATION_TYPE": "WEB",
+        }
+    ):
+        assert resolve_default_entry_url() == BIBLEGATEWAY_WEB_ENTRY_URL
+
+
+def test_resolve_default_entry_url_rejects_ambiguous_english_sources() -> None:
+    with _with_entry_url_env(
+        {
+            "KJV_ENTRY_URL": "https://thekingsbible.com/Bible/1/1",
+            "WEB_ENTRY_URL": BIBLEGATEWAY_WEB_ENTRY_URL,
+            "BIBLE_LANGUAGE_CODE": "en",
+        }
+    ):
+        try:
+            resolve_default_entry_url()
+        except ValueError as exc:
+            assert "Ambiguous entry URL" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")
+
+
+def test_resolve_default_entry_url_keeps_kjv_behaviour_without_web_entry_url() -> None:
+    with _with_entry_url_env(
+        {
+            "KJV_ENTRY_URL": "https://thekingsbible.com/Bible/1/1",
+            "NKRV_ENTRY_URL": "https://www.bskorea.or.kr/bible/korbibReadpage.php?version=GAE",
+            "BIBLE_LANGUAGE_CODE": "en",
+        }
+    ):
+        assert resolve_default_entry_url() == "https://thekingsbible.com/Bible/1/1"
+
+
+def test_validate_source_translation_compatibility_for_biblegateway_web() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(WEB_TRANSLATION_METADATA)
+    scraper = BibleGatewayScraper(BIBLEGATEWAY_WEB_ENTRY_URL)
+
+    validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+
+
+def test_validate_source_translation_compatibility_rejects_biblegateway_with_kjv() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = {
+        "id": 10,
+        "language_code": "en",
+        "name": "King James Version",
+        "translation_type": "KJV",
+    }
+    scraper = BibleGatewayScraper(BIBLEGATEWAY_WEB_ENTRY_URL)
+
+    try:
+        validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+    except RuntimeError as exc:
+        assert "Source/translation mismatch" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_validate_source_translation_compatibility_rejects_thekingsbible_with_web() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(WEB_TRANSLATION_METADATA)
+
+    class KingsBibleScraper(FakeScraper):
+        def get_source_name(self) -> str:
+            return "thekingsbible"
+
+    scraper = KingsBibleScraper("https://thekingsbible.com/Bible/1/1")
+
+    try:
+        validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+    except RuntimeError as exc:
+        assert "Source/translation mismatch" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_resolve_book_code_for_source_uses_book_name_for_biblegateway() -> None:
+    scraper = BibleGatewayScraper(BIBLEGATEWAY_WEB_ENTRY_URL)
+    book = Book(
+        id=75,
+        book_order=9,
+        book_key="1SA",
+        abbreviation="1Sam",
+        name="1 Samuel",
+    )
+
+    assert resolve_book_code_for_source(scraper, book) == "1 Samuel"
+
+
 def test_process_book_prefers_book_key_when_it_differs_from_canonical() -> None:
     repo = FakeRepo()
     conn = FakeConn()
