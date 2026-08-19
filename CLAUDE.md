@@ -13,11 +13,13 @@ Supported sources:
 | `thekingsbible.com` | KJV | Implemented |
 | `bskorea.or.kr` (`version=GAE`) | NKRV | Implemented |
 | `biblegateway.com` (`version=WEB`) | WEB (World English Bible) | Implemented |
+| `biblegateway.com` (`version=ASV`) | ASV (American Standard Version) | Implemented |
 
 Design documents:
 
 - [docs/nkrv-scraping-design.md](docs/nkrv-scraping-design.md) — NKRV
 - [docs/world-english-bible-scraping-design.md](docs/world-english-bible-scraping-design.md) — WEB
+- [docs/american-standard-version-scraping-design.md](docs/american-standard-version-scraping-design.md) — ASV
 
 ## Common commands
 
@@ -70,6 +72,7 @@ bskorea → biblegateway → bibletable → chapter-prefixed → ordered list �
 - **Source-specific parsers go first, generic inference parsers last.** If `_extract_verses_from_structured_nodes()` runs first, it misreads menus, footnotes, and dropdown text as verses.
 - A source-specific parser must **return `[]`** when the page is not its source, so the chain can continue. It must not raise.
 - `_extract_verses_from_bskorea_read_page()` calls `get_text("")` with no separator on purpose. Using `" "` splits Korean particles (e.g. `모세가` becomes `모세 가`).
+- `h3` / `h4.psalm-title` removal is **not dead code**: ASV tags editorial headings and psalm superscriptions with the verse-1 class, so dropping the rule silently prepends them to verse 1. WEB pages contain no `h3` at all, which is why only the ASV tests cover it.
 - `_extract_verses_from_biblegateway_passage()` reads verse numbers from the `span.text` **class token** (`Gen-2-1`), never from the rendered number: the first verse of a chapter displays the *chapter* number, so Genesis 2:1 would be stored as verse 2. It also merges same-numbered spans instead of deduplicating them (Psalms 23:4 arrives in four fragments) and drops `h4.psalm-title`, which carries the verse-1 class.
 - The four verses WEB leaves untranslated (Luke 17:36, Acts 8:37, 15:34, 24:7) are stored as `(omitted)` rather than skipped, so contiguous verse numbering stays an invariant and any real gap reads as a scrape failure. The marker is written **only** when the span holds a `sup.footnote` and no body text — never for an arbitrarily empty span, or a DOM change would quietly fill the DB with placeholders instead of failing.
 
@@ -86,7 +89,7 @@ In `scraper.py`:
 In `scrape_bible_to_db.py`:
 
 6. `resolve_default_entry_url()` / `_is_nkrv_translation_hint()` — entry URL resolution
-7. `validate_source_translation_compatibility()` — **last line of defense against mis-loading**
+7. `TRANSLATION_SOURCE_REQUIREMENTS` — one row per translation, drives `validate_source_translation_compatibility()` in **both** directions (source must produce the translation, and the translation must come from that source). **Last line of defense against mis-loading**
 8. `resolve_book_code_for_source()` — per-source book identifier
 
 Skipping step 7 lets, for example, WEB text land under the KJV translation — expensive to undo.
@@ -96,7 +99,7 @@ Skipping step 7 lets, for example, WEB text land under the KJV translation — e
 - `.env` is loaded with `os.environ.setdefault()`, so **shell environment variables win**.
 - Translation resolution order: `BIBLE_TRANSLATION_ID` → lookup by (`BIBLE_TRANSLATION_TYPE`, `BIBLE_TRANSLATION_NAME`, `BIBLE_LANGUAGE_CODE`) → legacy default `translation_id=10`.
 - That **legacy fallback of 10 is a trap**: with no variables set, data is silently written to translation 10.
-- Entry URL comes from `KJV_ENTRY_URL` / `NKRV_ENTRY_URL` / `WEB_ENTRY_URL`. `BIBLE_LANGUAGE_CODE=en` no longer identifies a source on its own — if both KJV and WEB URLs are set, resolution raises rather than guessing.
+- Entry URL comes from `KJV_ENTRY_URL` / `NKRV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL`. `BIBLE_LANGUAGE_CODE=en` no longer identifies a source on its own — with more than one English URL set, resolution raises rather than guessing. `BIBLE_TRANSLATION_ID` does **not** steer entry-URL selection, so an ID-only run can silently pick the wrong source; pass `BIBLE_TRANSLATION_TYPE` or `--entry-url`.
 - Never hardcode DB credentials (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`).
 
 ### CLI argument constraints

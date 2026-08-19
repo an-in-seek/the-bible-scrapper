@@ -2,16 +2,18 @@
 
 성경 본문을 스크래핑해 PostgreSQL의 `bible_chapter`, `bible_verse`에 적재하는 도구입니다.
 
-현재 기준으로 안정적으로 맞춰진 소스는 아래 3개입니다.
+현재 기준으로 안정적으로 맞춰진 소스는 아래 4개입니다.
 
 - `thekingsbible.com` KJV
 - `bskorea.or.kr` NKRV(`version=GAE`)
 - `biblegateway.com` WEB(`version=WEB`, World English Bible)
+- `biblegateway.com` ASV(`version=ASV`, American Standard Version)
 
 설계 문서:
 
 - NKRV: [docs/nkrv-scraping-design.md](docs/nkrv-scraping-design.md)
 - WEB: [docs/world-english-bible-scraping-design.md](docs/world-english-bible-scraping-design.md)
+- ASV: [docs/american-standard-version-scraping-design.md](docs/american-standard-version-scraping-design.md)
 
 ## 주요 특징
 
@@ -20,7 +22,7 @@
 - 장 단위로 `commit` 하며, 실패 시 진행 중이던 장만 `rollback` 하고 책 단위로 재시도합니다.
 - 실행 시작 시 `bible_chapter`, `bible_verse`의 ID 시퀀스를 현재 `MAX(id)`에 맞춰 동기화합니다.
 - `.env`를 자동 로드하되, 이미 셸에 설정된 환경변수는 덮어쓰지 않습니다.
-- KJV/NKRV 소스와 번역본 메타데이터가 어긋나면 실행 초기에 오류로 중단합니다.
+- 소스와 번역본 메타데이터가 어긋나면 실행 초기에 오류로 중단합니다. 양방향으로 검사합니다.
 - smoke test 경로는 DB 연결 없이 장 파싱만 검증합니다.
 
 ## 프로젝트 구조
@@ -36,6 +38,7 @@
 - `scripts/run_tests_wsl.sh`: WSL 테스트 실행 스크립트
 - `docs/nkrv-scraping-design.md`: NKRV 설계 문서
 - `docs/world-english-bible-scraping-design.md`: WEB 설계 문서
+- `docs/american-standard-version-scraping-design.md`: ASV 설계 문서
 
 ## 요구 사항
 
@@ -81,22 +84,26 @@ DB_PASSWORD=your_password
 KJV_ENTRY_URL=https://thekingsbible.com/Bible/1/1
 NKRV_ENTRY_URL=https://www.bskorea.or.kr/bible/korbibReadpage.php?version=GAE&book=gen&chap=1&sec=1&cVersion=&fontSize=15px&fontWeight=normal
 WEB_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=WEB
+ASV_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=ASV
 ```
 
 `--entry-url`를 지정하지 않으면 기본 URL은 아래 순서로 결정됩니다.
 
-1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB`)에 해당하는 환경변수
+1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV`)에 해당하는 환경변수
 2. `BIBLE_TRANSLATION_ID=2` 또는 `BIBLE_TRANSLATION_NAME=개역개정`이면 `NKRV_ENTRY_URL`
 3. `BIBLE_LANGUAGE_CODE`로 좁혀지는 소스가 하나면 그 값
    - `ko` -> `NKRV_ENTRY_URL`
-   - `en` -> `KJV_ENTRY_URL` 또는 `WEB_ENTRY_URL` 중 설정된 것
+   - `en` -> `KJV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` 중 설정된 것
 4. 설정된 엔트리 URL이 하나뿐이면 그 값
-5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` 순으로 선택
+5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` 순으로 선택
 6. 아무것도 없으면 내장 기본값 `https://thekingsbible.com/Bible/1/1` 사용
 
 주의: `BIBLE_LANGUAGE_CODE=en`은 더 이상 KJV를 단독으로 지시하지 않습니다.  
-`KJV_ENTRY_URL`과 `WEB_ENTRY_URL`이 함께 설정된 상태에서 `en`만 주면 실행이 중단됩니다.  
+영어 소스가 둘 이상 설정된 상태에서 `en`만 주면 실행이 중단됩니다.  
 이때는 `BIBLE_TRANSLATION_TYPE`을 지정하거나 `--entry-url`을 명시해야 합니다.
+
+`BIBLE_TRANSLATION_ID`는 엔트리 URL 선택에 쓰이지 않습니다.  
+ID만 지정하면 경고 없이 다른 소스가 선택될 수 있으므로, `BIBLE_TRANSLATION_TYPE`이나 `--entry-url`을 함께 쓰세요.
 
 ### 번역본 선택
 
@@ -226,6 +233,22 @@ WEB_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=W
   - 개역개정이 같은 구절을 `(없음)`으로 표기하는 관례를 따른 것입니다.
   - 덕분에 "절 번호는 1부터 연속"이 불변식이 되어, 구멍이 생기면 곧바로 스크래핑 결함으로 판정할 수 있습니다.
 
+### 4. ASV `biblegateway.com`
+
+WEB과 동일한 어댑터를 사용하며 `version`만 다릅니다. 파서는 공유합니다.
+
+권장 엔트리 URL:
+
+```env
+ASV_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=ASV
+```
+
+WEB과 다른 점:
+
+- ASV는 편집자 소제목(`h3`)과 시편 표제(`h4.psalm-title`)를 함께 사용하며, 둘 다 1절 클래스를 갖습니다. 파서가 제거하므로 절 본문에 섞이지 않습니다.
+- ASV가 본문에서 빼는 절은 스팬 자체가 없어 `(omitted)` 마커가 생성되지 않습니다. 절 번호에 구멍이 생기며, 처리 방향은 설계 문서 7절을 참고하세요.
+- 각주가 WEB보다 3~5배 많습니다.
+
 ## 네트워크와 재시도
 
 - `429`, `502`, `503`, `504` 응답은 자동 재시도합니다.
@@ -338,6 +361,16 @@ export WEB_ENTRY_URL="https://www.biblegateway.com/passage/?search=Genesis%201&v
 python3 scrape_bible_to_db.py --start-book 1 --end-book 5
 ```
 
+### ASV 실행
+
+```bash
+export BIBLE_TRANSLATION_TYPE=ASV
+export BIBLE_TRANSLATION_NAME="American Standard Version"
+export BIBLE_LANGUAGE_CODE=en
+export ASV_ENTRY_URL="https://www.biblegateway.com/passage/?search=Genesis%201&version=ASV"
+python3 scrape_bible_to_db.py --entry-url "$ASV_ENTRY_URL" --start-book 1 --end-book 5
+```
+
 ### WEB smoke test
 
 ```bash
@@ -396,9 +429,12 @@ CREATE INDEX idx_verse_chapter_id ON bible_verse(chapter_id);
 
 ### `Source/translation mismatch`
 
-- `thekingsbible.com`에 NKRV/WEB 번역본 메타데이터를 붙였거나
-- `bskorea.or.kr?version=GAE`에 KJV/WEB 메타데이터를 붙였거나
-- `biblegateway.com?version=WEB`에 KJV/NKRV 메타데이터를 붙인 경우입니다.
+소스와 번역본 메타데이터가 어긋난 경우입니다. 양방향으로 검사합니다.
+
+- 소스가 요구하는 번역본이 아닌 경우 (예: `?version=ASV`에 WEB 메타데이터)
+- 번역본이 요구하는 소스가 아닌 경우 (예: `thekingsbible.com`에 ASV 메타데이터)
+
+각 번역본의 소스/버전 요건은 `TRANSLATION_SOURCE_REQUIREMENTS` 표에 정의되어 있습니다.
 
 ### `Ambiguous entry URL`
 
