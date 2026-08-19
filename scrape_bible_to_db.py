@@ -19,15 +19,45 @@ ENTRY_URL_ENV_BY_TRANSLATION_TYPE = {
     "KJV": "KJV_ENTRY_URL",
     "NKRV": "NKRV_ENTRY_URL",
     "WEB": "WEB_ENTRY_URL",
+    "ASV": "ASV_ENTRY_URL",
 }
-# A language code alone no longer identifies a source: 'en' now covers KJV and WEB.
+# A language code alone does not identify a source: 'en' covers KJV, WEB and ASV.
 TRANSLATION_TYPES_BY_LANGUAGE_CODE = {
     "ko": ("NKRV",),
-    "en": ("KJV", "WEB"),
+    "en": ("KJV", "WEB", "ASV"),
 }
 LEGACY_TRANSLATION_TYPE_BY_ID = {"2": "NKRV"}
 # Tie-break when nothing else narrows it down; keeps the pre-WEB default.
-ENTRY_URL_PREFERENCE_ORDER = ("NKRV", "KJV", "WEB")
+ENTRY_URL_PREFERENCE_ORDER = ("NKRV", "KJV", "WEB", "ASV")
+# Which source may legitimately produce each translation, and how to recognise the
+# translation when bible_translation.translation_type is empty. Drives the
+# source/translation check in both directions, so adding a translation is one row.
+TRANSLATION_SOURCE_REQUIREMENTS = {
+    "KJV": {
+        "source": "thekingsbible",
+        "version": None,
+        "name": "King James Version",
+        "language_code": "en",
+    },
+    "NKRV": {
+        "source": "bskorea",
+        "version": "GAE",
+        "name": "개역개정",
+        "language_code": "ko",
+    },
+    "WEB": {
+        "source": "biblegateway",
+        "version": "WEB",
+        "name": "World English Bible",
+        "language_code": "en",
+    },
+    "ASV": {
+        "source": "biblegateway",
+        "version": "ASV",
+        "name": "American Standard Version",
+        "language_code": "en",
+    },
+}
 
 
 def _configured_entry_urls() -> dict[str, str]:
@@ -251,77 +281,105 @@ def resolve_books(
     return repo.fetch_books(conn, resolved_start, end_book)
 
 
+def _expected_translation_type(source_name: str, version: str | None) -> str | None:
+    """Translation this source/version combination is expected to produce."""
+    for translation_type, requirement in TRANSLATION_SOURCE_REQUIREMENTS.items():
+        if requirement["source"] != source_name:
+            continue
+        required_version = requirement["version"]
+        if required_version is None or required_version == version:
+            return translation_type
+    return None
+
+
+def _translation_type_by_identity(name: str, language_code: str) -> str | None:
+    """Recognise a translation from its name/language when translation_type is empty."""
+    for translation_type, requirement in TRANSLATION_SOURCE_REQUIREMENTS.items():
+        if requirement["name"] == name and requirement["language_code"] == language_code:
+            return translation_type
+    return None
+
+
 def validate_source_translation_compatibility(
     repo: BibleRepository,
     conn,
     scraper: HolyBibleScraper,
 ) -> None:
+    """
+    Last line of defense against loading one translation's text under another's books.
+
+    Checks both directions: the source must produce the resolved translation, and the
+    resolved translation must come from that source.
+    """
     metadata = repo.get_translation_metadata(conn)
     source_name = scraper.get_source_name()
     parsed_entry = urlparse(scraper.entry_url)
     query_params = dict(parse_qsl(parsed_entry.query, keep_blank_values=True))
+    version = query_params.get("version")
 
     translation_type = str(metadata.get("translation_type") or "")
     translation_name = str(metadata.get("name") or "")
     language_code = str(metadata.get("language_code") or "")
 
-    if source_name == "bskorea" and query_params.get("version") == "GAE":
-        if translation_type == "NKRV":
-            return
-        if translation_name == "개역개정" and language_code == "ko":
-            logging.warning(
-                "Translation metadata matched NKRV by name/language but translation_type was %r",
-                translation_type,
-            )
-            return
-        raise RuntimeError(
-            "Source/translation mismatch: bskorea GAE source requires "
-            "translation_type='NKRV' (preferred), or at minimum name='개역개정' and "
-            "language_code='ko'. "
-            f"Resolved translation metadata={metadata}"
-        )
+    expected_type = _expected_translation_type(source_name, version)
 
-    if source_name == "biblegateway" and query_params.get("version") == "WEB":
-        if translation_type == "WEB":
+    if expected_type is not None:
+        if translation_type == expected_type:
             return
-        if translation_name == "World English Bible" and language_code == "en":
-            logging.warning(
-                "Translation metadata matched WEB by name/language but translation_type was %r",
-                translation_type,
-            )
-            return
-        raise RuntimeError(
-            "Source/translation mismatch: biblegateway WEB source requires "
-            "translation_type='WEB' (preferred), or at minimum name='World English Bible' "
-            "and language_code='en'. "
-            f"Resolved translation metadata={metadata}"
-        )
 
-    if source_name == "thekingsbible":
-        if translation_type in ("NKRV", "WEB"):
+        requirement = TRANSLATION_SOURCE_REQUIREMENTS[expected_type]
+        if translation_type:
             raise RuntimeError(
-                "Source/translation mismatch: thekingsbible source cannot be used with "
-                f"translation_type={translation_type!r}. "
-                f"Resolved translation metadata={metadata}"
-            )
-        if translation_type == "" and translation_name == "개역개정" and language_code == "ko":
-            raise RuntimeError(
-                "Source/translation mismatch: thekingsbible source cannot be used with "
-                "개역개정/ko translation metadata when translation_type is missing. "
-                f"Resolved translation metadata={metadata}"
+                f"Source/translation mismatch: {source_name} source"
+                + (f" (version={version})" if version else "")
+                + f" requires translation_type={expected_type!r}, "
+                f"but resolved translation metadata={metadata}"
             )
 
-    if source_name == "bskorea" and translation_type == "WEB":
+        # translation_type is empty: fall back to name/language identity.
+        if (
+            translation_name == requirement["name"]
+            and language_code == requirement["language_code"]
+        ):
+            logging.warning(
+                "Translation metadata matched %s by name/language but translation_type was empty",
+                expected_type,
+            )
+            return
+
+        conflicting = _translation_type_by_identity(translation_name, language_code)
+        if conflicting is not None:
+            raise RuntimeError(
+                f"Source/translation mismatch: {source_name} source requires "
+                f"translation_type={expected_type!r}, but the metadata identifies "
+                f"{conflicting!r}. Resolved translation metadata={metadata}"
+            )
+
+        logging.warning(
+            "translation_type is empty and the metadata does not identify a known "
+            "translation; source/translation compatibility could not be verified. "
+            "Resolved translation metadata=%s",
+            metadata,
+        )
+        return
+
+    # The source has no expected translation (e.g. an unmapped biblegateway version).
+    # Still refuse when the resolved translation belongs to a different source.
+    requirement = TRANSLATION_SOURCE_REQUIREMENTS.get(translation_type)
+    if requirement is None:
+        return
+
+    if requirement["source"] != source_name:
         raise RuntimeError(
-            "Source/translation mismatch: bskorea source cannot be used with "
-            "translation_type='WEB'. "
+            f"Source/translation mismatch: translation_type={translation_type!r} must be "
+            f"loaded from {requirement['source']!r}, not {source_name!r}. "
             f"Resolved translation metadata={metadata}"
         )
 
-    if source_name == "biblegateway" and translation_type in ("KJV", "NKRV"):
+    if requirement["version"] is not None and version is not None and requirement["version"] != version:
         raise RuntimeError(
-            "Source/translation mismatch: biblegateway source cannot be used with "
-            f"translation_type={translation_type!r}. "
+            f"Source/translation mismatch: translation_type={translation_type!r} requires "
+            f"version={requirement['version']!r}, but the entry URL uses version={version!r}. "
             f"Resolved translation metadata={metadata}"
         )
 

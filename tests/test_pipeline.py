@@ -452,6 +452,129 @@ def test_validate_source_translation_compatibility_rejects_thekingsbible_with_we
         raise AssertionError("expected RuntimeError")
 
 
+BIBLEGATEWAY_ASV_ENTRY_URL = "https://www.biblegateway.com/passage/?search=Genesis%201&version=ASV"
+
+ASV_TRANSLATION_METADATA = {
+    "id": 23,
+    "language_code": "en",
+    "name": "American Standard Version",
+    "translation_type": "ASV",
+}
+
+
+def test_resolve_default_entry_url_uses_asv_entry_url_when_only_one_configured() -> None:
+    with _with_entry_url_env({"ASV_ENTRY_URL": BIBLEGATEWAY_ASV_ENTRY_URL}):
+        assert resolve_default_entry_url() == BIBLEGATEWAY_ASV_ENTRY_URL
+
+
+def test_resolve_default_entry_url_prefers_asv_when_translation_type_is_asv() -> None:
+    with _with_entry_url_env(
+        {
+            "KJV_ENTRY_URL": "https://thekingsbible.com/Bible/1/1",
+            "WEB_ENTRY_URL": BIBLEGATEWAY_WEB_ENTRY_URL,
+            "ASV_ENTRY_URL": BIBLEGATEWAY_ASV_ENTRY_URL,
+            "BIBLE_TRANSLATION_TYPE": "ASV",
+        }
+    ):
+        assert resolve_default_entry_url() == BIBLEGATEWAY_ASV_ENTRY_URL
+
+
+def test_resolve_default_entry_url_rejects_three_way_english_ambiguity() -> None:
+    with _with_entry_url_env(
+        {
+            "KJV_ENTRY_URL": "https://thekingsbible.com/Bible/1/1",
+            "WEB_ENTRY_URL": BIBLEGATEWAY_WEB_ENTRY_URL,
+            "ASV_ENTRY_URL": BIBLEGATEWAY_ASV_ENTRY_URL,
+            "BIBLE_LANGUAGE_CODE": "en",
+        }
+    ):
+        try:
+            resolve_default_entry_url()
+        except ValueError as exc:
+            assert "Ambiguous entry URL" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")
+
+
+def test_validate_source_translation_compatibility_for_biblegateway_asv() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(ASV_TRANSLATION_METADATA)
+    scraper = BibleGatewayScraper(BIBLEGATEWAY_ASV_ENTRY_URL)
+
+    validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+
+
+def test_validate_source_translation_compatibility_rejects_asv_source_with_web_metadata() -> None:
+    # The ASV entry URL must not load into the WEB translation.
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(WEB_TRANSLATION_METADATA)
+    scraper = BibleGatewayScraper(BIBLEGATEWAY_ASV_ENTRY_URL)
+
+    try:
+        validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+    except RuntimeError as exc:
+        assert "Source/translation mismatch" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_validate_source_translation_compatibility_rejects_thekingsbible_with_asv() -> None:
+    # Reachable in practice: BIBLE_TRANSLATION_ID alone does not steer the entry URL,
+    # so an ASV run can silently fall back to the KJV source.
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(ASV_TRANSLATION_METADATA)
+
+    class KingsBibleScraper(FakeScraper):
+        def get_source_name(self) -> str:
+            return "thekingsbible"
+
+    scraper = KingsBibleScraper("https://thekingsbible.com/Bible/1/1")
+
+    try:
+        validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+    except RuntimeError as exc:
+        assert "Source/translation mismatch" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_validate_source_translation_compatibility_rejects_bskorea_with_asv() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(ASV_TRANSLATION_METADATA)
+    scraper = FakeScraper(
+        "https://www.bskorea.or.kr/bible/korbibReadpage.php"
+        "?version=GAE&book=gen&chap=1&sec=1&cVersion=&fontSize=15px&fontWeight=normal"
+    )
+
+    try:
+        validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+    except RuntimeError as exc:
+        assert "Source/translation mismatch" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_validate_source_translation_compatibility_rejects_unmapped_version_with_web() -> None:
+    # A biglegateway version outside the table must not accept WEB metadata.
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(WEB_TRANSLATION_METADATA)
+    scraper = BibleGatewayScraper(
+        "https://www.biblegateway.com/passage/?search=Genesis%201&version=KJ21"
+    )
+
+    try:
+        validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+    except RuntimeError as exc:
+        assert "Source/translation mismatch" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
 def test_resolve_book_code_for_source_uses_book_name_for_biblegateway() -> None:
     scraper = BibleGatewayScraper(BIBLEGATEWAY_WEB_ENTRY_URL)
     book = Book(

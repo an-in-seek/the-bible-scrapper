@@ -537,6 +537,51 @@ def test_parse_verses_from_biblegateway_prefers_translated_fragment_over_marker(
     assert verses[0].text == "Actual translated line."
 
 
+def test_parse_verses_from_biblegateway_drops_editorial_section_heading() -> None:
+    # ASV renders editorial headings as <h3> and tags them with the verse-1 class,
+    # so keeping them would prepend the heading to Psalms 23:1. WEB has no <h3> at
+    # all, which makes this the only coverage for that removal rule.
+    html = """
+    <div class="passage-text"><div class="passage-content"><div class="version-ASV">
+      <h4 class="psalm-title"><span class="text Ps-23-1">A Psalm of David.</span></h4>
+      <h3><span class="text Ps-23-1" id="en-ASV-14237">Jehovah the psalmist's shepherd.</span></h3>
+      <div class="poetry"><p class="line">
+        <span class="text Ps-23-1"><span class="chapternum">23 </span>Jehovah is my shepherd;</span><br/>
+        <span class="text Ps-23-1">I shall not want.</span>
+      </p></div>
+    </div></div></div>
+    """
+    scraper = HolyBibleScraper(
+        entry_url="https://www.biblegateway.com/passage/?search=Psalms%2023&version=ASV"
+    )
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert verses[0].text == "Jehovah is my shepherd; I shall not want."
+
+
+def test_parse_verses_from_biblegateway_handles_asv_chapter_without_verse_span() -> None:
+    # ASV omits Acts 8:37 by dropping the span entirely; the footnote marker hangs off
+    # verse 36. Nothing should be invented for the missing number.
+    html = """
+    <div class="passage-text"><div class="passage-content"><div class="version-ASV">
+      <p>
+        <span class="text Acts-8-36"><sup class="versenum">36 </sup>They came unto a certain water.<sup class="footnote">[<a href="#f">l</a>]</sup></span>
+        <span class="text Acts-8-38"><sup class="versenum">38 </sup>And he commanded the chariot to stand still.</span>
+      </p>
+    </div></div></div>
+    """
+    scraper = HolyBibleScraper(
+        entry_url="https://www.biblegateway.com/passage/?search=Acts%208&version=ASV"
+    )
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [36, 38]
+    assert all(verse.text != "(omitted)" for verse in verses)
+
+
 def test_biblegateway_parser_returns_empty_for_other_sources() -> None:
     scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
     soup = BeautifulSoup("<div class='bible_read'><p>1 text</p></div>", "html.parser")
