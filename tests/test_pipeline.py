@@ -2,6 +2,7 @@ import os
 
 from models import Book, ChapterPayload, Verse
 from scrape_bible_to_db import (
+    ENTRY_URL_ENV_BY_TRANSLATION_TYPE,
     process_book,
     resolve_book_code_for_source,
     resolve_default_entry_url,
@@ -323,10 +324,9 @@ WEB_TRANSLATION_METADATA = {
     "translation_type": "WEB",
 }
 
-ENTRY_URL_ENV_KEYS = (
-    "KJV_ENTRY_URL",
-    "NKRV_ENTRY_URL",
-    "WEB_ENTRY_URL",
+# Derived from the source of truth so a newly supported translation cannot leak
+# between tests: a hardcoded list silently missed ASV_ENTRY_URL once already.
+ENTRY_URL_ENV_KEYS = tuple(ENTRY_URL_ENV_BY_TRANSLATION_TYPE.values()) + (
     "BIBLE_TRANSLATION_ID",
     "BIBLE_TRANSLATION_TYPE",
     "BIBLE_TRANSLATION_NAME",
@@ -566,6 +566,86 @@ def test_validate_source_translation_compatibility_rejects_unmapped_version_with
     scraper = BibleGatewayScraper(
         "https://www.biblegateway.com/passage/?search=Genesis%201&version=KJ21"
     )
+
+    try:
+        validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+    except RuntimeError as exc:
+        assert "Source/translation mismatch" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+EBIBLE_RV1909_ENTRY_URL = "https://ebible.org/spaRV1909/GEN01.htm"
+
+RVR1909_TRANSLATION_METADATA = {
+    "id": 29,
+    "language_code": "es",
+    "name": "Reina Valera 1909",
+    "translation_type": "RVR1909",
+}
+
+
+class EbibleScraper(FakeScraper):
+    def get_source_name(self) -> str:
+        return "ebible"
+
+
+def test_resolve_default_entry_url_uses_rvr1909_when_only_one_configured() -> None:
+    with _with_entry_url_env({"RVR1909_ENTRY_URL": EBIBLE_RV1909_ENTRY_URL}):
+        assert resolve_default_entry_url() == EBIBLE_RV1909_ENTRY_URL
+
+
+def test_resolve_default_entry_url_selects_rvr1909_by_spanish_language_code() -> None:
+    with _with_entry_url_env(
+        {
+            "KJV_ENTRY_URL": "https://thekingsbible.com/Bible/1/1",
+            "RVR1909_ENTRY_URL": EBIBLE_RV1909_ENTRY_URL,
+            "BIBLE_LANGUAGE_CODE": "es",
+        }
+    ):
+        assert resolve_default_entry_url() == EBIBLE_RV1909_ENTRY_URL
+
+
+def test_validate_source_translation_compatibility_for_ebible_rvr1909() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(RVR1909_TRANSLATION_METADATA)
+    scraper = EbibleScraper(EBIBLE_RV1909_ENTRY_URL)
+
+    validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+
+
+def test_validate_source_translation_compatibility_rejects_ebible_with_rvr1960() -> None:
+    # RVR1960 already exists in the DB; loading 1909 text under it would be silent
+    # corruption, so the check must refuse it.
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = {
+        "id": 28,
+        "language_code": "es",
+        "name": "Reina-Valera 1960",
+        "translation_type": "RVR1960",
+    }
+    scraper = EbibleScraper(EBIBLE_RV1909_ENTRY_URL)
+
+    try:
+        validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+    except RuntimeError as exc:
+        assert "Source/translation mismatch" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_validate_source_translation_compatibility_rejects_thekingsbible_with_rvr1909() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(RVR1909_TRANSLATION_METADATA)
+
+    class KingsBibleScraper(FakeScraper):
+        def get_source_name(self) -> str:
+            return "thekingsbible"
+
+    scraper = KingsBibleScraper("https://thekingsbible.com/Bible/1/1")
 
     try:
         validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)

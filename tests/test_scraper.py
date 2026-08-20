@@ -582,6 +582,143 @@ def test_parse_verses_from_biblegateway_handles_asv_chapter_without_verse_span()
     assert all(verse.text != "(omitted)" for verse in verses)
 
 
+EBIBLE_ENTRY_URL = "https://ebible.org/spaRV1909/GEN01.htm"
+
+EBIBLE_CHAPTER_HTML = """
+<ul class="tnav"><li><a href="index.htm">Génesis</a></li><li><a href="GEN02.htm">&gt;</a></li></ul>
+<div class="main">
+<div class="mt">Génesis</div><div class="chapterlabel" id="V0"> 1</div><div class="p">
+<span class="verse" id="V1">1&nbsp;</span>EN el principio crió Dios los cielos y la tierra.
+<span class="verse" id="V2">2&nbsp;</span>Y la tierra estaba desordenada y vacía.
+<span class="verse" id="V3">3&nbsp;</span>Y dijo Dios: Júntense las aguas que <span class="add">están</span> debajo de los cielos.
+</div>
+<ul class="tnav"><li><a href="index.htm">Génesis</a></li></ul>
+<div class="footnote"><hr></div>
+<div class="copyright"><p><a href="copyright.htm">Public Domain</a></p></div>
+</div>
+"""
+
+
+class FakeResponse:
+    """Minimal stand-in for requests.Response for encoding tests."""
+
+    def __init__(self, body: str, content_type: str, encoding: str | None) -> None:
+        self.content = body.encode("utf-8")
+        self.headers = {"Content-Type": content_type}
+        self.status_code = 200
+        self.encoding = encoding
+        self.apparent_encoding = "utf-8"
+
+    @property
+    def text(self) -> str:
+        return self.content.decode(self.encoding or "utf-8", errors="replace")
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+class FakeSession:
+    def __init__(self, response: FakeResponse) -> None:
+        self.response = response
+        self.headers: dict[str, str] = {}
+
+    def get(self, url: str, timeout: int | None = None) -> FakeResponse:
+        return self.response
+
+
+def _ebible_scraper() -> HolyBibleScraper:
+    return HolyBibleScraper(entry_url=EBIBLE_ENTRY_URL, sleep_min=0.0, sleep_max=0.0)
+
+
+def test_get_source_name_detects_ebible() -> None:
+    assert _ebible_scraper().get_source_name() == "ebible"
+
+
+def test_build_ebible_url_pads_chapter_per_book() -> None:
+    scraper = _ebible_scraper()
+
+    assert scraper._build_chapter_url(1, 1) == "https://ebible.org/spaRV1909/GEN01.htm"
+    assert scraper._build_chapter_url(1, 50) == "https://ebible.org/spaRV1909/GEN50.htm"
+    # Psalms has 150 chapters, so eBible pads it to three digits: PSA23.htm is a 404.
+    assert scraper._build_chapter_url(19, 23) == "https://ebible.org/spaRV1909/PSA023.htm"
+    assert scraper._build_chapter_url(19, 119) == "https://ebible.org/spaRV1909/PSA119.htm"
+    assert scraper._build_chapter_url(64, 1) == "https://ebible.org/spaRV1909/3JN01.htm"
+    assert scraper._build_chapter_url(66, 22) == "https://ebible.org/spaRV1909/REV22.htm"
+
+
+def test_build_ebible_url_inherits_translation_code_from_entry_url() -> None:
+    scraper = HolyBibleScraper(
+        entry_url="https://ebible.org/engwebp/GEN01.htm", sleep_min=0.0, sleep_max=0.0
+    )
+
+    assert scraper._build_chapter_url(1, 2) == "https://ebible.org/engwebp/GEN02.htm"
+
+
+def test_discover_ebible_chapter_urls_uses_canonical_count() -> None:
+    scraper = _ebible_scraper()
+
+    assert len(scraper.discover_chapter_urls_for_book(1)) == 50
+    assert len(scraper.discover_chapter_urls_for_book(19)) == 150
+    assert len(scraper.discover_chapter_urls_for_book(65)) == 1
+
+
+def test_parse_verses_from_ebible_page_accumulates_between_markers() -> None:
+    verses = _ebible_scraper().parse_verses_from_html(EBIBLE_CHAPTER_HTML)
+
+    assert [verse.verse_number for verse in verses] == [1, 2, 3]
+    assert verses[0].text == "EN el principio crió Dios los cielos y la tierra."
+    # The marker text must not leak into the body.
+    assert not verses[0].text.startswith("1")
+    # Supplied words are body text.
+    assert "están" in verses[2].text
+    # Navigation, book title and copyright must not appear.
+    assert all("Génesis" not in verse.text for verse in verses)
+    assert all("Public Domain" not in verse.text for verse in verses)
+
+
+def test_parse_verses_from_ebible_page_separates_block_boundaries() -> None:
+    # Defensive rule: no observed RV1909 chapter splits a verse across blocks, so this
+    # is the only coverage that the join inserts a space instead of gluing words.
+    html = """
+    <div class="main">
+      <div class="p"><span class="verse" id="V1">1&nbsp;</span>primera parte</div>
+      <div class="p">segunda parte</div>
+    </div>
+    """
+    verses = _ebible_scraper().parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert verses[0].text == "primera parte segunda parte"
+
+
+def test_ebible_parser_returns_empty_for_other_sources() -> None:
+    scraper = _ebible_scraper()
+    soup = BeautifulSoup("<div class='bible_read'><p>1 text</p></div>", "html.parser")
+
+    assert scraper._extract_verses_from_ebible_page(soup) == []
+
+
+def test_request_html_recovers_encoding_when_header_omits_charset() -> None:
+    scraper = _ebible_scraper()
+    response = FakeResponse("<p>JEHOVÁ es mi pastor</p>", "text/html", "ISO-8859-1")
+    scraper.session = FakeSession(response)
+
+    html = scraper._request_html("https://ebible.org/spaRV1909/PSA023.htm")
+
+    assert "JEHOVÁ" in html
+    assert response.encoding == "utf-8"
+
+
+def test_request_html_keeps_declared_charset_untouched() -> None:
+    scraper = _ebible_scraper()
+    response = FakeResponse("<p>ok</p>", "text/html; charset=UTF-8", "UTF-8")
+    scraper.session = FakeSession(response)
+
+    scraper._request_html("https://example.com/page.htm")
+
+    assert response.encoding == "UTF-8"
+
+
 def test_biblegateway_parser_returns_empty_for_other_sources() -> None:
     scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
     soup = BeautifulSoup("<div class='bible_read'><p>1 text</p></div>", "html.parser")

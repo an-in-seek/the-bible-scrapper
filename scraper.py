@@ -12,7 +12,7 @@ from typing import Iterable
 from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlparse, urlunparse
 
 import requests
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup, NavigableString, Tag
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_random_exponential
 
 from models import ChapterPayload, Verse
@@ -44,7 +44,8 @@ DEFAULT_USER_AGENT = (
 )
 MIN_VERSE_NUMBER = 1
 MAX_VERSE_NUMBER = 200
-BSKOREA_BOOK_CODES: tuple[str, ...] = (
+# USFM book codes, shared by bskorea (lowercase) and ebible.org (uppercase).
+USFM_BOOK_CODES: tuple[str, ...] = (
     "gen", "exo", "lev", "num", "deu", "jos", "jdg", "rut", "1sa", "2sa", "1ki", "2ki",
     "1ch", "2ch", "ezr", "neh", "est", "job", "psa", "pro", "ecc", "sng", "isa", "jer",
     "lam", "ezk", "dan", "hos", "jol", "amo", "oba", "jon", "mic", "nam", "hab", "zep",
@@ -89,6 +90,19 @@ BIBLEGATEWAY_INLINE_REMOVABLE_SELECTOR = (
 # verse numbers always means a scrape failure, never a translation choice. Mirrors the
 # "(없음)" convention Korean editions use for the same verses.
 BIBLEGATEWAY_OMITTED_VERSE_TEXT = "(omitted)"
+DEFAULT_EBIBLE_RV1909_ENTRY_URL = "https://ebible.org/spaRV1909/GEN01.htm"
+DEFAULT_EBIBLE_TRANSLATION_CODE = "spaRV1909"
+# Verse markers are `<span class="verse" id="V12">`; the chapter label uses V0.
+EBIBLE_VERSE_ID_PATTERN = re.compile(r"^V(\d{1,3})$")
+# Everything in div.main that is not scripture. `ul.tnav` matters most: it holds the
+# book name and prev/next links. The USFM heading/note classes were not observed in
+# RV1909 but are emitted by the same renderer for other translations.
+EBIBLE_REMOVABLE_SELECTOR = (
+    "ul.tnav, div.mt, div.mt1, div.mt2, div.ms, div.ms1, div.s, div.s1, div.s2, "
+    "div.chapterlabel, div.footnote, div.copyright, div.navbar, "
+    "a.notemark, span.notemark, span.footnote, span.crossref"
+)
+EBIBLE_BLOCK_TAGS = frozenset({"div", "p", "li", "table", "tr", "blockquote"})
 
 
 class RetryableHttpError(RuntimeError):
@@ -142,6 +156,8 @@ class HolyBibleScraper:
             return "bskorea"
         if self._is_biblegateway_source():
             return "biblegateway"
+        if self._is_ebible_source():
+            return "ebible"
         return "generic"
 
     def parse_verses_from_html(self, html: str) -> list[Verse]:
@@ -172,6 +188,14 @@ class HolyBibleScraper:
         if response.status_code in (502, 503, 504):
             raise RetryableHttpError(f"Retryable status={response.status_code} url={url}")
         response.raise_for_status()
+
+        # requests falls back to ISO-8859-1 when Content-Type carries no charset,
+        # which mojibakes UTF-8 pages that declare the encoding only in a <meta>
+        # tag (ebible.org does exactly that). Sources that send a charset are
+        # left untouched.
+        if "charset=" not in (response.headers.get("Content-Type") or "").lower():
+            response.encoding = response.apparent_encoding or "utf-8"
+
         html = response.text
 
         # Some providers return HTTP 200 with a rate-limit/error body.
@@ -463,8 +487,8 @@ class HolyBibleScraper:
 
     @staticmethod
     def _get_bskorea_book_code(book_order: int) -> str | None:
-        if 1 <= book_order <= len(BSKOREA_BOOK_CODES):
-            return BSKOREA_BOOK_CODES[book_order - 1]
+        if 1 <= book_order <= len(USFM_BOOK_CODES):
+            return USFM_BOOK_CODES[book_order - 1]
         return None
 
     def _build_bskorea_url(
@@ -521,6 +545,33 @@ class HolyBibleScraper:
         search = quote(f"{book_name} {chapter_number}")
         return f"{base_url}?search={search}&version={quote(version)}"
 
+    def _is_ebible_source(self) -> bool:
+        return "ebible.org" in urlparse(self.entry_url or "").netloc.lower()
+
+    def _get_ebible_translation_code(self) -> str:
+        """First path segment of the entry URL, e.g. ".../spaRV1909/GEN01.htm"."""
+        segments = [part for part in urlparse(self.entry_url or "").path.split("/") if part]
+        return segments[0] if segments else DEFAULT_EBIBLE_TRANSLATION_CODE
+
+    @staticmethod
+    def _build_ebible_chapter_segment(book_order: int, chapter_number: int) -> str | None:
+        if not 1 <= book_order <= len(USFM_BOOK_CODES):
+            return None
+        chapter_count = KJV_CHAPTER_COUNTS[book_order - 1]
+        # Zero-padded to a per-book width: Psalms (150 chapters) needs three digits,
+        # every other book two. PSA23.htm is a 404 while PSA023.htm is not.
+        width = 3 if chapter_count >= 100 else 2
+        return f"{USFM_BOOK_CODES[book_order - 1].upper()}{chapter_number:0{width}d}"
+
+    def _build_ebible_url(self, book_order: int, chapter_number: int) -> str:
+        segment = self._build_ebible_chapter_segment(book_order, chapter_number)
+        if segment is None:
+            raise ValueError(f"Invalid ebible book order: {book_order}")
+
+        parsed = urlparse(self.entry_url or DEFAULT_EBIBLE_RV1909_ENTRY_URL)
+        base_url = urlunparse(parsed._replace(path="", params="", query="", fragment=""))
+        return f"{base_url}/{self._get_ebible_translation_code()}/{segment}.htm"
+
     @staticmethod
     def _get_kjv_chapter_count(book_order: int) -> int | None:
         if 1 <= book_order <= len(KJV_CHAPTER_COUNTS):
@@ -559,6 +610,8 @@ class HolyBibleScraper:
             return self._build_bskorea_url(book_order, chapter_number, book_code=book_code)
         if self._is_biblegateway_source():
             return self._build_biblegateway_url(book_order, chapter_number, book_code=book_code)
+        if self._is_ebible_source():
+            return self._build_ebible_url(book_order, chapter_number)
         template = self._ensure_navigation_template()
         return self._build_chapter_url_from_template(template, book_order, chapter_number)
 
@@ -611,6 +664,10 @@ class HolyBibleScraper:
                 book_order,
                 book_code=book_code,
             )
+            self._chapter_url_cache[book_order] = chapter_urls
+            return chapter_urls
+        if self._is_ebible_source():
+            chapter_urls = self._discover_chapter_urls_for_ebible(book_order)
             self._chapter_url_cache[book_order] = chapter_urls
             return chapter_urls
 
@@ -706,6 +763,16 @@ class HolyBibleScraper:
             for chapter_num in range(1, chapter_count + 1)
         }
 
+    def _discover_chapter_urls_for_ebible(self, book_order: int) -> dict[int, str]:
+        chapter_count = self._get_kjv_chapter_count(book_order)
+        if chapter_count is None:
+            return {}
+
+        return {
+            chapter_num: self._build_ebible_url(book_order, chapter_num)
+            for chapter_num in range(1, chapter_count + 1)
+        }
+
     def fetch_chapter_payload(
         self,
         book_order: int,
@@ -740,6 +807,13 @@ class HolyBibleScraper:
         biblegateway_verses = self._extract_verses_from_biblegateway_passage(soup)
         if biblegateway_verses:
             return biblegateway_verses
+
+        # Must also precede the generic parsers: the regex fallback happily parses an
+        # eBible chapter into a full, contiguous verse list with the verse number left
+        # inside verse 1, which no verse-count check would catch.
+        ebible_verses = self._extract_verses_from_ebible_page(soup)
+        if ebible_verses:
+            return ebible_verses
 
         bibletable_verses = self._extract_verses_from_bibletable(soup)
         if bibletable_verses:
@@ -905,6 +979,66 @@ class HolyBibleScraper:
             translated = [text for text, is_omitted in parts if not is_omitted]
             text = " ".join(translated) if translated else BIBLEGATEWAY_OMITTED_VERSE_TEXT
             verses.append(Verse(verse_number=verse_number, text=text))
+        return verses
+
+    def _extract_verses_from_ebible_page(self, soup: BeautifulSoup) -> list[Verse]:
+        """
+        Parse an eBible.org (USFM-derived) chapter page:
+          <div class="main">
+            <div class="p"><span class="verse" id="V1">1&nbsp;</span>text...</div>
+          </div>
+
+        Unlike BibleGateway, verse text is NOT wrapped in an element: `span.verse` is
+        only the number marker and the body follows as sibling nodes. Text is therefore
+        accumulated between markers rather than read out of a node.
+        """
+        container = soup.select_one("div.main")
+        if container is None:
+            return []
+
+        working = BeautifulSoup(str(container), "html.parser")
+        for removable in working.select(EBIBLE_REMOVABLE_SELECTOR):
+            removable.decompose()
+
+        if working.select_one("span.verse") is None:
+            return []
+
+        chunks: dict[int, list[str]] = {}
+        current: int | None = None
+        block_changed = False
+
+        for node in working.descendants:
+            if isinstance(node, Tag):
+                classes = node.get("class") or []
+                if node.name == "span" and "verse" in classes:
+                    # The id is authoritative; the rendered marker is display text.
+                    match = EBIBLE_VERSE_ID_PATTERN.match(node.get("id") or "")
+                    current = int(match.group(1)) if match else None
+                    block_changed = False
+                elif node.name in EBIBLE_BLOCK_TAGS and current is not None:
+                    block_changed = True
+                continue
+
+            if not isinstance(node, NavigableString) or current is None:
+                continue
+            # The marker's own text is the verse number, never body text.
+            if node.find_parent("span", class_="verse") is not None:
+                continue
+
+            text = str(node)
+            if not text.strip():
+                continue
+
+            # Keep source whitespace inside a block; separate blocks with one space so
+            # a verse spanning two paragraphs does not concatenate words.
+            chunks.setdefault(current, []).append((" " if block_changed else "") + text)
+            block_changed = False
+
+        verses: list[Verse] = []
+        for verse_number, parts in sorted(chunks.items()):
+            text = self._normalize_text("".join(parts).replace(" ", " "))
+            if text:
+                verses.append(Verse(verse_number=verse_number, text=text))
         return verses
 
     def _extract_verses_from_bibletable(self, soup: BeautifulSoup) -> list[Verse]:

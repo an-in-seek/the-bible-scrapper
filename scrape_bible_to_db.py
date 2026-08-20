@@ -20,15 +20,17 @@ ENTRY_URL_ENV_BY_TRANSLATION_TYPE = {
     "NKRV": "NKRV_ENTRY_URL",
     "WEB": "WEB_ENTRY_URL",
     "ASV": "ASV_ENTRY_URL",
+    "RVR1909": "RVR1909_ENTRY_URL",
 }
 # A language code alone does not identify a source: 'en' covers KJV, WEB and ASV.
 TRANSLATION_TYPES_BY_LANGUAGE_CODE = {
     "ko": ("NKRV",),
     "en": ("KJV", "WEB", "ASV"),
+    "es": ("RVR1909",),
 }
 LEGACY_TRANSLATION_TYPE_BY_ID = {"2": "NKRV"}
 # Tie-break when nothing else narrows it down; keeps the pre-WEB default.
-ENTRY_URL_PREFERENCE_ORDER = ("NKRV", "KJV", "WEB", "ASV")
+ENTRY_URL_PREFERENCE_ORDER = ("NKRV", "KJV", "WEB", "ASV", "RVR1909")
 # Which source may legitimately produce each translation, and how to recognise the
 # translation when bible_translation.translation_type is empty. Drives the
 # source/translation check in both directions, so adding a translation is one row.
@@ -56,6 +58,12 @@ TRANSLATION_SOURCE_REQUIREMENTS = {
         "version": "ASV",
         "name": "American Standard Version",
         "language_code": "en",
+    },
+    "RVR1909": {
+        "source": "ebible",
+        "version": None,
+        "name": "Reina Valera 1909",
+        "language_code": "es",
     },
 }
 
@@ -181,8 +189,8 @@ def parse_args() -> argparse.Namespace:
         "--entry-url",
         default=None,
         help=(
-            "Source entry URL "
-            "(default: env KJV_ENTRY_URL, NKRV_ENTRY_URL, WEB_ENTRY_URL, or built-in default)"
+            "Source entry URL (default: env KJV_ENTRY_URL, NKRV_ENTRY_URL, "
+            "WEB_ENTRY_URL, ASV_ENTRY_URL, RVR1909_ENTRY_URL, or built-in default)"
         ),
     )
     parser.add_argument(
