@@ -15,42 +15,109 @@ from scraper import DEFAULT_ENTRY_URL, HolyBibleScraper
 BOOK_TRANSITION_DELAY_SECONDS = 5
 
 
-def _is_nkrv_translation_hint() -> bool | None:
-    translation_id = os.getenv("BIBLE_TRANSLATION_ID")
-    translation_type = (os.getenv("BIBLE_TRANSLATION_TYPE") or "").strip().upper()
-    translation_name = (os.getenv("BIBLE_TRANSLATION_NAME") or "").strip()
-    language_code = (os.getenv("BIBLE_LANGUAGE_CODE") or "").strip().lower()
+ENTRY_URL_ENV_BY_TRANSLATION_TYPE = {
+    "KJV": "KJV_ENTRY_URL",
+    "NKRV": "NKRV_ENTRY_URL",
+    "WEB": "WEB_ENTRY_URL",
+    "ASV": "ASV_ENTRY_URL",
+}
+# A language code alone does not identify a source: 'en' covers KJV, WEB and ASV.
+TRANSLATION_TYPES_BY_LANGUAGE_CODE = {
+    "ko": ("NKRV",),
+    "en": ("KJV", "WEB", "ASV"),
+}
+LEGACY_TRANSLATION_TYPE_BY_ID = {"2": "NKRV"}
+# Tie-break when nothing else narrows it down; keeps the pre-WEB default.
+ENTRY_URL_PREFERENCE_ORDER = ("NKRV", "KJV", "WEB", "ASV")
+# Which source may legitimately produce each translation, and how to recognise the
+# translation when bible_translation.translation_type is empty. Drives the
+# source/translation check in both directions, so adding a translation is one row.
+TRANSLATION_SOURCE_REQUIREMENTS = {
+    "KJV": {
+        "source": "thekingsbible",
+        "version": None,
+        "name": "King James Version",
+        "language_code": "en",
+    },
+    "NKRV": {
+        "source": "bskorea",
+        "version": "GAE",
+        "name": "개역개정",
+        "language_code": "ko",
+    },
+    "WEB": {
+        "source": "biblegateway",
+        "version": "WEB",
+        "name": "World English Bible",
+        "language_code": "en",
+    },
+    "ASV": {
+        "source": "biblegateway",
+        "version": "ASV",
+        "name": "American Standard Version",
+        "language_code": "en",
+    },
+}
 
-    if (
-        translation_id == "2"
-        or translation_type == "NKRV"
-        or translation_name == "개역개정"
-        or language_code == "ko"
-    ):
-        return True
 
-    if (
-        translation_type == "KJV"
-        or language_code == "en"
-    ):
-        return False
+def _configured_entry_urls() -> dict[str, str]:
+    configured: dict[str, str] = {}
+    for translation_type, env_name in ENTRY_URL_ENV_BY_TRANSLATION_TYPE.items():
+        value = os.getenv(env_name)
+        if value:
+            configured[translation_type] = value
+    return configured
+
+
+def _translation_type_hint() -> str | None:
+    declared = (os.getenv("BIBLE_TRANSLATION_TYPE") or "").strip().upper()
+    if declared in ENTRY_URL_ENV_BY_TRANSLATION_TYPE:
+        return declared
+
+    translation_id = (os.getenv("BIBLE_TRANSLATION_ID") or "").strip()
+    if translation_id in LEGACY_TRANSLATION_TYPE_BY_ID:
+        return LEGACY_TRANSLATION_TYPE_BY_ID[translation_id]
+
+    if (os.getenv("BIBLE_TRANSLATION_NAME") or "").strip() == "개역개정":
+        return "NKRV"
 
     return None
 
 
 def resolve_default_entry_url() -> str:
-    kjv_entry_url = os.getenv("KJV_ENTRY_URL")
-    nkrv_entry_url = os.getenv("NKRV_ENTRY_URL")
+    configured = _configured_entry_urls()
+    if not configured:
+        return DEFAULT_ENTRY_URL
 
-    if kjv_entry_url and nkrv_entry_url:
-        nkrv_hint = _is_nkrv_translation_hint()
-        if nkrv_hint is True:
-            return nkrv_entry_url
-        if nkrv_hint is False:
-            return kjv_entry_url
-        return nkrv_entry_url
+    hint = _translation_type_hint()
+    if hint is not None and hint in configured:
+        return configured[hint]
 
-    return kjv_entry_url or nkrv_entry_url or DEFAULT_ENTRY_URL
+    language_code = (os.getenv("BIBLE_LANGUAGE_CODE") or "").strip().lower()
+    by_language = [
+        translation_type
+        for translation_type in TRANSLATION_TYPES_BY_LANGUAGE_CODE.get(language_code, ())
+        if translation_type in configured
+    ]
+    if len(by_language) == 1:
+        return configured[by_language[0]]
+    if len(by_language) > 1:
+        env_names = ", ".join(
+            ENTRY_URL_ENV_BY_TRANSLATION_TYPE[translation_type] for translation_type in by_language
+        )
+        raise ValueError(
+            f"Ambiguous entry URL: BIBLE_LANGUAGE_CODE={language_code!r} matches {env_names}. "
+            "Set BIBLE_TRANSLATION_TYPE or pass --entry-url explicitly."
+        )
+
+    if len(configured) == 1:
+        return next(iter(configured.values()))
+
+    for translation_type in ENTRY_URL_PREFERENCE_ORDER:
+        if translation_type in configured:
+            return configured[translation_type]
+
+    return DEFAULT_ENTRY_URL
 
 
 def configure_logging(verbose: bool = False) -> None:
@@ -112,8 +179,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--entry-url",
-        default=resolve_default_entry_url(),
-        help="Source entry URL (default: env KJV_ENTRY_URL, NKRV_ENTRY_URL, or built-in default)",
+        default=None,
+        help=(
+            "Source entry URL "
+            "(default: env KJV_ENTRY_URL, NKRV_ENTRY_URL, WEB_ENTRY_URL, or built-in default)"
+        ),
     )
     parser.add_argument(
         "--book-retries",
@@ -211,53 +281,118 @@ def resolve_books(
     return repo.fetch_books(conn, resolved_start, end_book)
 
 
+def _expected_translation_type(source_name: str, version: str | None) -> str | None:
+    """Translation this source/version combination is expected to produce."""
+    for translation_type, requirement in TRANSLATION_SOURCE_REQUIREMENTS.items():
+        if requirement["source"] != source_name:
+            continue
+        required_version = requirement["version"]
+        if required_version is None or required_version == version:
+            return translation_type
+    return None
+
+
+def _translation_type_by_identity(name: str, language_code: str) -> str | None:
+    """Recognise a translation from its name/language when translation_type is empty."""
+    for translation_type, requirement in TRANSLATION_SOURCE_REQUIREMENTS.items():
+        if requirement["name"] == name and requirement["language_code"] == language_code:
+            return translation_type
+    return None
+
+
 def validate_source_translation_compatibility(
     repo: BibleRepository,
     conn,
     scraper: HolyBibleScraper,
 ) -> None:
+    """
+    Last line of defense against loading one translation's text under another's books.
+
+    Checks both directions: the source must produce the resolved translation, and the
+    resolved translation must come from that source.
+    """
     metadata = repo.get_translation_metadata(conn)
     source_name = scraper.get_source_name()
     parsed_entry = urlparse(scraper.entry_url)
     query_params = dict(parse_qsl(parsed_entry.query, keep_blank_values=True))
+    version = query_params.get("version")
 
     translation_type = str(metadata.get("translation_type") or "")
     translation_name = str(metadata.get("name") or "")
     language_code = str(metadata.get("language_code") or "")
 
-    if source_name == "bskorea" and query_params.get("version") == "GAE":
-        if translation_type == "NKRV":
+    expected_type = _expected_translation_type(source_name, version)
+
+    if expected_type is not None:
+        if translation_type == expected_type:
             return
-        if translation_name == "개역개정" and language_code == "ko":
+
+        requirement = TRANSLATION_SOURCE_REQUIREMENTS[expected_type]
+        if translation_type:
+            raise RuntimeError(
+                f"Source/translation mismatch: {source_name} source"
+                + (f" (version={version})" if version else "")
+                + f" requires translation_type={expected_type!r}, "
+                f"but resolved translation metadata={metadata}"
+            )
+
+        # translation_type is empty: fall back to name/language identity.
+        if (
+            translation_name == requirement["name"]
+            and language_code == requirement["language_code"]
+        ):
             logging.warning(
-                "Translation metadata matched NKRV by name/language but translation_type was %r",
-                translation_type,
+                "Translation metadata matched %s by name/language but translation_type was empty",
+                expected_type,
             )
             return
+
+        conflicting = _translation_type_by_identity(translation_name, language_code)
+        if conflicting is not None:
+            raise RuntimeError(
+                f"Source/translation mismatch: {source_name} source requires "
+                f"translation_type={expected_type!r}, but the metadata identifies "
+                f"{conflicting!r}. Resolved translation metadata={metadata}"
+            )
+
+        logging.warning(
+            "translation_type is empty and the metadata does not identify a known "
+            "translation; source/translation compatibility could not be verified. "
+            "Resolved translation metadata=%s",
+            metadata,
+        )
+        return
+
+    # The source has no expected translation (e.g. an unmapped biblegateway version).
+    # Still refuse when the resolved translation belongs to a different source.
+    requirement = TRANSLATION_SOURCE_REQUIREMENTS.get(translation_type)
+    if requirement is None:
+        return
+
+    if requirement["source"] != source_name:
         raise RuntimeError(
-            "Source/translation mismatch: bskorea GAE source requires "
-            "translation_type='NKRV' (preferred), or at minimum name='개역개정' and "
-            "language_code='ko'. "
+            f"Source/translation mismatch: translation_type={translation_type!r} must be "
+            f"loaded from {requirement['source']!r}, not {source_name!r}. "
             f"Resolved translation metadata={metadata}"
         )
 
-    if source_name == "thekingsbible":
-        if translation_type == "NKRV":
-            raise RuntimeError(
-                "Source/translation mismatch: thekingsbible source cannot be used with "
-                "translation_type='NKRV'. "
-                f"Resolved translation metadata={metadata}"
-            )
-        if translation_type == "" and translation_name == "개역개정" and language_code == "ko":
-            raise RuntimeError(
-                "Source/translation mismatch: thekingsbible source cannot be used with "
-                "개역개정/ko translation metadata when translation_type is missing. "
-                f"Resolved translation metadata={metadata}"
-            )
+    if requirement["version"] is not None and version is not None and requirement["version"] != version:
+        raise RuntimeError(
+            f"Source/translation mismatch: translation_type={translation_type!r} requires "
+            f"version={requirement['version']!r}, but the entry URL uses version={version!r}. "
+            f"Resolved translation metadata={metadata}"
+        )
 
 
 def resolve_book_code_for_source(scraper: HolyBibleScraper, book: Book) -> str | None:
-    if scraper.get_source_name() != "bskorea":
+    source_name = scraper.get_source_name()
+
+    if source_name == "biblegateway":
+        # BibleGateway expects a readable book name ("1 Samuel"), not a key like
+        # "1SA", so the constant table wins over bible_book.book_key here.
+        return scraper._get_biblegateway_book_name(book.book_order)
+
+    if source_name != "bskorea":
         return None
 
     candidate = (book.book_key or "").strip().lower()
@@ -284,7 +419,12 @@ def process_book(
     end_chapter: int | None = None,
 ) -> tuple[int, int, int]:
     """
-    Process one book in current transaction.
+    Process one book, committing after each chapter.
+
+    A chapter row and its verses are written in the same transaction, so a failure
+    mid-book leaves completed chapters durable and never leaves a chapter row
+    without verses. Chapters that parse nothing are skipped before any write.
+
     Returns: (chapter_count, inserted_chapter_count, inserted_verse_count)
     """
     logging.info("[BOOK %02d] Start: %s", book.book_order, book.name)
@@ -313,23 +453,12 @@ def process_book(
 
     chapter_map = repo.get_chapter_map(conn, book.id)
     chapter_numbers = sorted(chapter_urls.keys())
-    missing_chapters = [c for c in chapter_numbers if c not in chapter_map]
-    inserted_chapters = repo.insert_missing_chapters(conn, book.id, missing_chapters)
 
-    if missing_chapters:
-        chapter_map = repo.get_chapter_map(conn, book.id)
-
+    inserted_chapters_total = 0
     inserted_verses_total = 0
     parsed_verses_total = 0
 
     for chapter_number in chapter_numbers:
-        chapter_id = chapter_map.get(chapter_number)
-        if chapter_id is None:
-            # Defensive fallback if map is stale.
-            repo.insert_missing_chapters(conn, book.id, [chapter_number])
-            chapter_map = repo.get_chapter_map(conn, book.id)
-            chapter_id = chapter_map[chapter_number]
-
         chapter_url = chapter_urls[chapter_number]
         logging.info(
             "[BOOK %02d][CH %03d] Fetching...",
@@ -337,6 +466,7 @@ def process_book(
             chapter_number,
         )
 
+        # Fetch before touching the DB so a skipped chapter opens no transaction.
         payload = scraper.fetch_chapter_payload(
             book.book_order,
             chapter_number,
@@ -361,10 +491,20 @@ def process_book(
             )
             continue
 
-        parsed_verses_total += len(payload.verses)
+        chapter_id = chapter_map.get(chapter_number)
+        if chapter_id is None:
+            repo.insert_missing_chapters(conn, book.id, [chapter_number])
+            chapter_map = repo.get_chapter_map(conn, book.id)
+            chapter_id = chapter_map[chapter_number]
+            inserted_chapters_total += 1
+
         existing_numbers = repo.get_existing_verse_numbers(conn, chapter_id)
         new_verses = [v for v in payload.verses if v.verse_number not in existing_numbers]
         inserted = repo.insert_missing_verses(conn, chapter_id, new_verses)
+
+        conn.commit()  # chapter-level commit
+
+        parsed_verses_total += len(payload.verses)
         inserted_verses_total += inserted
 
         logging.info(
@@ -380,17 +520,18 @@ def process_book(
         "[BOOK %02d] Done. chapters=%d, inserted_chapters=%d, inserted_verses=%d",
         book.book_order,
         len(chapter_numbers),
-        inserted_chapters,
+        inserted_chapters_total,
         inserted_verses_total,
     )
 
     if parsed_verses_total == 0:
+        # Nothing was committed: every chapter was skipped before its write.
         raise RuntimeError(
             f"[BOOK {book.book_order}] Parsed 0 verses across all chapters; "
-            "aborting commit to avoid storing empty scrape result."
+            "no chapter was committed."
         )
 
-    return len(chapter_numbers), inserted_chapters, inserted_verses_total
+    return len(chapter_numbers), inserted_chapters_total, inserted_verses_total
 
 
 def run() -> int:
@@ -410,11 +551,13 @@ def run() -> int:
             end_chapter=args.end_chapter,
         )
         validate_test_target_args(args.test_book, args.test_chapter)
+        # Resolved after parsing so an explicit --entry-url skips resolution entirely.
+        entry_url = args.entry_url or resolve_default_entry_url()
     except ValueError as exc:
         logging.error(str(exc))
         return 2
 
-    scraper = HolyBibleScraper(entry_url=args.entry_url)
+    scraper = HolyBibleScraper(entry_url=entry_url)
 
     # Smoke test path should not require DB connection.
     if args.test_genesis1 or args.test_book is not None:
@@ -471,14 +614,17 @@ def run() -> int:
                         start_chapter=args.start_chapter,
                         end_chapter=args.end_chapter,
                     )
-                    conn.commit()  # book-level commit
-                    logging.info("[BOOK %02d] COMMIT success", book.book_order)
+                    # process_book() already committed each chapter; this only
+                    # closes the empty transaction left open by the last read.
+                    conn.commit()
+                    logging.info("[BOOK %02d] COMPLETED", book.book_order)
                     completed = True
                     break
                 except Exception:
-                    conn.rollback()  # book-level rollback
+                    # Discards only the in-flight chapter; committed ones stay.
+                    conn.rollback()
                     logging.exception(
-                        "[BOOK %02d] attempt=%d/%d failed, rolled back",
+                        "[BOOK %02d] attempt=%d/%d failed, rolled back in-flight chapter",
                         book.book_order,
                         attempt,
                         args.book_retries,

@@ -1,3 +1,5 @@
+from bs4 import BeautifulSoup
+
 from scraper import HolyBibleScraper
 
 
@@ -295,3 +297,293 @@ def test_parse_verses_from_bskorea_keeps_korean_particles_attached() -> None:
 
     assert len(verses) == 1
     assert verses[0].text == "모세가 모압 평지에서 느보 산에 올라가"
+
+
+BIBLEGATEWAY_ENTRY_URL = "https://www.biblegateway.com/passage/?search=Genesis%201&version=WEB"
+
+
+def test_get_source_name_detects_biblegateway() -> None:
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
+
+    assert scraper.get_source_name() == "biblegateway"
+
+
+def test_build_biblegateway_url_rule() -> None:
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
+
+    assert scraper._build_chapter_url(1, 1) == (
+        "https://www.biblegateway.com/passage/?search=Genesis%201&version=WEB"
+    )
+    assert scraper._build_chapter_url(40, 28) == (
+        "https://www.biblegateway.com/passage/?search=Matthew%2028&version=WEB"
+    )
+
+
+def test_build_biblegateway_url_encodes_multiword_book_name() -> None:
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
+
+    assert scraper._build_chapter_url(9, 1) == (
+        "https://www.biblegateway.com/passage/?search=1%20Samuel%201&version=WEB"
+    )
+
+
+def test_build_biblegateway_url_inherits_version_from_entry_url() -> None:
+    scraper = HolyBibleScraper(
+        entry_url="https://www.biblegateway.com/passage/?search=Genesis%201&version=ASV"
+    )
+
+    assert scraper._build_chapter_url(1, 2).endswith("?search=Genesis%202&version=ASV")
+
+
+def test_discover_biblegateway_chapter_urls_uses_canonical_count() -> None:
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
+
+    genesis = scraper.discover_chapter_urls_for_book(1)
+    jude = scraper.discover_chapter_urls_for_book(65)
+
+    assert len(genesis) == 50
+    assert genesis[50].endswith("?search=Genesis%2050&version=WEB")
+    assert len(jude) == 1
+    assert jude[1].endswith("?search=Jude%201&version=WEB")
+
+
+def test_biblegateway_source_enforces_crawl_delay_floor() -> None:
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL, sleep_min=0.1, sleep_max=0.2)
+
+    assert scraper.sleep_min >= 15.0
+    assert scraper.sleep_max >= 15.0
+
+
+def test_other_sources_keep_default_sleep_settings() -> None:
+    scraper = HolyBibleScraper(entry_url="https://thekingsbible.com/Bible/1/1")
+
+    assert scraper.sleep_min == 0.3
+    assert scraper.sleep_max == 1.0
+
+
+def test_parse_verses_from_biblegateway_html_structure() -> None:
+    html = """
+    <div class="passage-table" data-osis="Gen.1.1-Gen.1.31">
+      <div class="passage-text">
+        <div class="passage-content passage-class-0">
+          <div class="version-WEB result-text-style-normal text-html">
+            <p class="chapter-1">
+              <span id="en-WEB-1" class="text Gen-1-1"><span class="chapternum">1&nbsp;</span>In the beginning, God<sup data-fn="#fen-WEB-1a" class="footnote">[<a href="#fen-WEB-1a">a</a>]</sup> created the heavens and the earth. </span>
+              <span id="en-WEB-2" class="text Gen-1-2"><sup class="versenum">2&nbsp;</sup>The earth was formless and empty.</span>
+            </p>
+            <div class="footnotes">
+              <h4>Footnotes</h4>
+              <ol><li id="fen-WEB-1a"><a href="#en-WEB-1">1:1</a> <span class="footnote-text">The Hebrew word rendered God is Elohim.</span></li></ol>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [1, 2]
+    assert verses[0].text == "In the beginning, God created the heavens and the earth."
+    assert verses[1].text == "The earth was formless and empty."
+    assert all("Footnotes" not in verse.text for verse in verses)
+    assert all("Elohim" not in verse.text for verse in verses)
+
+
+def test_parse_verses_from_biblegateway_uses_class_token_not_chapternum() -> None:
+    # The first verse of a chapter renders the chapter number, not the verse number.
+    html = """
+    <div class="passage-text"><div class="passage-content">
+      <div class="version-WEB">
+        <p class="chapter-1">
+          <span class="text Gen-2-1" id="en-WEB-32"><span class="chapternum">2&nbsp;</span>The heavens, the earth, and all their vast array were finished. </span>
+          <span class="text Gen-2-2" id="en-WEB-33"><sup class="versenum">2&nbsp;</sup>On the seventh day God finished his work.</span>
+        </p>
+      </div>
+    </div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [1, 2]
+    assert verses[0].text.startswith("The heavens")
+
+
+def test_parse_verses_from_biblegateway_merges_split_spans_and_drops_psalm_title() -> None:
+    html = """
+    <div class="passage-text"><div class="passage-content">
+      <div class="version-WEB">
+        <h4 class="psalm-title"><span class="text Ps-23-1" id="en-WEB-14237">A Psalm by David.</span></h4>
+        <div class="poetry"><p class="line">
+          <span class="chapter-2"><span class="text Ps-23-1"><span class="chapternum">23 </span>Yahweh is my shepherd;</span></span><br/>
+          <span class="indent-1"><span class="indent-1-breaks">    </span><span class="text Ps-23-1">I shall lack nothing.</span></span><br/>
+          <span class="text Ps-23-2" id="en-WEB-14238"><sup class="versenum">2 </sup>He makes me lie down in green pastures.</span>
+        </p></div>
+      </div>
+    </div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [1, 2]
+    assert verses[0].text == "Yahweh is my shepherd; I shall lack nothing."
+
+
+def test_parse_verses_from_biblegateway_keeps_words_of_jesus() -> None:
+    html = """
+    <div class="passage-text"><div class="passage-content">
+      <div class="version-WEB">
+        <p><span class="text Matt-5-3" id="en-WEB-23238"><sup class="versenum">3 </sup><span class="woj">Blessed are the poor in spirit,</span><sup class="crossreference" data-cr="#cen-WEB-23238A">(<a href="#cen-WEB-23238A">A</a>)</sup></span></p>
+        <div class="poetry"><p class="line"><span class="indent-1"><span class="text Matt-5-3"><span class="woj">for theirs is the Kingdom of Heaven.</span></span></span></p></div>
+        <div class="crossrefs hidden"><a class="crossref-link" href="#">Matthew 5:3</a> : Isaiah 57:15</div>
+      </div>
+    </div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert verses[0].text == "Blessed are the poor in spirit, for theirs is the Kingdom of Heaven."
+
+
+def test_parse_verses_from_biblegateway_uses_first_passage_text_only() -> None:
+    html = """
+    <div class="passage-text"><div class="passage-content"><div class="version-WEB">
+      <p><span class="text Gen-1-1">Primary translation verse.</span></p>
+    </div></div></div>
+    <div class="passage-text"><div class="passage-content"><div class="version-NIV">
+      <p><span class="text Gen-1-1">Parallel translation verse.</span></p>
+    </div></div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert verses[0].text == "Primary translation verse."
+
+
+def test_parse_verses_from_biblegateway_ignores_other_chapters() -> None:
+    html = """
+    <div class="passage-text"><div class="passage-content"><div class="version-WEB">
+      <p>
+        <span class="text Gen-1-30">Verse thirty of chapter one.</span>
+        <span class="text Gen-1-31">Verse thirty-one of chapter one.</span>
+        <span class="text Gen-2-1">Verse one of chapter two.</span>
+      </p>
+    </div></div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [30, 31]
+
+
+def test_parse_verses_from_biblegateway_records_untranslated_verse() -> None:
+    # WEB leaves Acts 8:37 untranslated: the span holds only a footnote marker.
+    html = """
+    <div class="passage-text"><div class="passage-content"><div class="version-WEB">
+      <p>
+        <span class="text Acts-8-36" id="en-WEB-1"><sup class="versenum">36 </sup>They came to some water.</span>
+        <span class="text Acts-8-37" id="en-WEB-2"><sup class="versenum">37 </sup><sup data-fn="#fen-WEB-a" class="footnote">[<a href="#fen-WEB-a">a</a>]</sup></span>
+        <span class="text Acts-8-38" id="en-WEB-3"><sup class="versenum">38 </sup>He commanded the chariot to stand still.</span>
+      </p>
+    </div></div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [36, 37, 38]
+    assert verses[1].text == "(omitted)"
+
+
+def test_parse_verses_from_biblegateway_drops_empty_span_without_footnote() -> None:
+    # Guard: an empty span with no footnote is a parse failure, not an omission.
+    html = """
+    <div class="passage-text"><div class="passage-content"><div class="version-WEB">
+      <p>
+        <span class="text Gen-1-1" id="en-WEB-1"><sup class="versenum">1 </sup>Real verse text.</span>
+        <span class="text Gen-1-2" id="en-WEB-2"><sup class="versenum">2 </sup></span>
+      </p>
+    </div></div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [1]
+
+
+def test_parse_verses_from_biblegateway_prefers_translated_fragment_over_marker() -> None:
+    html = """
+    <div class="passage-text"><div class="passage-content"><div class="version-WEB">
+      <p>
+        <span class="text Luke-17-36"><sup class="versenum">36 </sup><sup class="footnote">[<a href="#a">a</a>]</sup></span>
+        <span class="text Luke-17-36">Actual translated line.</span>
+      </p>
+    </div></div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert verses[0].text == "Actual translated line."
+
+
+def test_parse_verses_from_biblegateway_drops_editorial_section_heading() -> None:
+    # ASV renders editorial headings as <h3> and tags them with the verse-1 class,
+    # so keeping them would prepend the heading to Psalms 23:1. WEB has no <h3> at
+    # all, which makes this the only coverage for that removal rule.
+    html = """
+    <div class="passage-text"><div class="passage-content"><div class="version-ASV">
+      <h4 class="psalm-title"><span class="text Ps-23-1">A Psalm of David.</span></h4>
+      <h3><span class="text Ps-23-1" id="en-ASV-14237">Jehovah the psalmist's shepherd.</span></h3>
+      <div class="poetry"><p class="line">
+        <span class="text Ps-23-1"><span class="chapternum">23 </span>Jehovah is my shepherd;</span><br/>
+        <span class="text Ps-23-1">I shall not want.</span>
+      </p></div>
+    </div></div></div>
+    """
+    scraper = HolyBibleScraper(
+        entry_url="https://www.biblegateway.com/passage/?search=Psalms%2023&version=ASV"
+    )
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert verses[0].text == "Jehovah is my shepherd; I shall not want."
+
+
+def test_parse_verses_from_biblegateway_handles_asv_chapter_without_verse_span() -> None:
+    # ASV omits Acts 8:37 by dropping the span entirely; the footnote marker hangs off
+    # verse 36. Nothing should be invented for the missing number.
+    html = """
+    <div class="passage-text"><div class="passage-content"><div class="version-ASV">
+      <p>
+        <span class="text Acts-8-36"><sup class="versenum">36 </sup>They came unto a certain water.<sup class="footnote">[<a href="#f">l</a>]</sup></span>
+        <span class="text Acts-8-38"><sup class="versenum">38 </sup>And he commanded the chariot to stand still.</span>
+      </p>
+    </div></div></div>
+    """
+    scraper = HolyBibleScraper(
+        entry_url="https://www.biblegateway.com/passage/?search=Acts%208&version=ASV"
+    )
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [36, 38]
+    assert all(verse.text != "(omitted)" for verse in verses)
+
+
+def test_biblegateway_parser_returns_empty_for_other_sources() -> None:
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
+    soup = BeautifulSoup("<div class='bible_read'><p>1 text</p></div>", "html.parser")
+
+    assert scraper._extract_verses_from_biblegateway_passage(soup) == []

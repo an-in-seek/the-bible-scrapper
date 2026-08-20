@@ -2,21 +2,27 @@
 
 성경 본문을 스크래핑해 PostgreSQL의 `bible_chapter`, `bible_verse`에 적재하는 도구입니다.
 
-현재 기준으로 안정적으로 맞춰진 소스는 아래 2개입니다.
+현재 기준으로 안정적으로 맞춰진 소스는 아래 4개입니다.
 
 - `thekingsbible.com` KJV
 - `bskorea.or.kr` NKRV(`version=GAE`)
+- `biblegateway.com` WEB(`version=WEB`, World English Bible)
+- `biblegateway.com` ASV(`version=ASV`, American Standard Version)
 
-NKRV 설계 문서는 [docs/bskorea_scraping_design.md](docs/bskorea_scraping_design.md)에 있습니다.
+설계 문서:
+
+- NKRV: [docs/nkrv-scraping-design.md](docs/nkrv-scraping-design.md)
+- WEB: [docs/world-english-bible-scraping-design.md](docs/world-english-bible-scraping-design.md)
+- ASV: [docs/american-standard-version-scraping-design.md](docs/american-standard-version-scraping-design.md)
 
 ## 주요 특징
 
 - `bible_book`의 기존 row를 조회해 사용하며 book 자체는 생성하지 않습니다.
 - `bible_chapter`, `bible_verse`는 기존 데이터를 재사용하고 없는 데이터만 insert 합니다.
-- 책 단위로 `commit`/`rollback` 하며, 실패 시 책 단위 재시도를 수행합니다.
+- 장 단위로 `commit` 하며, 실패 시 진행 중이던 장만 `rollback` 하고 책 단위로 재시도합니다.
 - 실행 시작 시 `bible_chapter`, `bible_verse`의 ID 시퀀스를 현재 `MAX(id)`에 맞춰 동기화합니다.
 - `.env`를 자동 로드하되, 이미 셸에 설정된 환경변수는 덮어쓰지 않습니다.
-- KJV/NKRV 소스와 번역본 메타데이터가 어긋나면 실행 초기에 오류로 중단합니다.
+- 소스와 번역본 메타데이터가 어긋나면 실행 초기에 오류로 중단합니다. 양방향으로 검사합니다.
 - smoke test 경로는 DB 연결 없이 장 파싱만 검증합니다.
 
 ## 프로젝트 구조
@@ -30,7 +36,9 @@ NKRV 설계 문서는 [docs/bskorea_scraping_design.md](docs/bskorea_scraping_de
 - `tests/test_db.py`: 번역본 식별 로직 테스트
 - `tests/test_pipeline.py`: 파이프라인/인자 검증 테스트
 - `scripts/run_tests_wsl.sh`: WSL 테스트 실행 스크립트
-- `docs/bskorea_scraping_design.md`: NKRV 설계 문서
+- `docs/nkrv-scraping-design.md`: NKRV 설계 문서
+- `docs/world-english-bible-scraping-design.md`: WEB 설계 문서
+- `docs/american-standard-version-scraping-design.md`: ASV 설계 문서
 
 ## 요구 사항
 
@@ -75,20 +83,27 @@ DB_PASSWORD=your_password
 ```env
 KJV_ENTRY_URL=https://thekingsbible.com/Bible/1/1
 NKRV_ENTRY_URL=https://www.bskorea.or.kr/bible/korbibReadpage.php?version=GAE&book=gen&chap=1&sec=1&cVersion=&fontSize=15px&fontWeight=normal
+WEB_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=WEB
+ASV_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=ASV
 ```
 
 `--entry-url`를 지정하지 않으면 기본 URL은 아래 순서로 결정됩니다.
 
-1. `KJV_ENTRY_URL`와 `NKRV_ENTRY_URL`가 둘 다 있으면 번역본 힌트에 따라 선택
-2. 둘 중 하나만 있으면 그 값을 사용
-3. 둘 다 없으면 내장 기본값 `https://thekingsbible.com/Bible/1/1` 사용
+1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV`)에 해당하는 환경변수
+2. `BIBLE_TRANSLATION_ID=2` 또는 `BIBLE_TRANSLATION_NAME=개역개정`이면 `NKRV_ENTRY_URL`
+3. `BIBLE_LANGUAGE_CODE`로 좁혀지는 소스가 하나면 그 값
+   - `ko` -> `NKRV_ENTRY_URL`
+   - `en` -> `KJV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` 중 설정된 것
+4. 설정된 엔트리 URL이 하나뿐이면 그 값
+5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` 순으로 선택
+6. 아무것도 없으면 내장 기본값 `https://thekingsbible.com/Bible/1/1` 사용
 
-번역본 힌트는 아래 값으로 판단합니다.
+주의: `BIBLE_LANGUAGE_CODE=en`은 더 이상 KJV를 단독으로 지시하지 않습니다.  
+영어 소스가 둘 이상 설정된 상태에서 `en`만 주면 실행이 중단됩니다.  
+이때는 `BIBLE_TRANSLATION_TYPE`을 지정하거나 `--entry-url`을 명시해야 합니다.
 
-- NKRV 힌트: `BIBLE_TRANSLATION_ID=2`, `BIBLE_TRANSLATION_TYPE=NKRV`, `BIBLE_LANGUAGE_CODE=ko`
-- KJV 힌트: `BIBLE_TRANSLATION_TYPE=KJV`, `BIBLE_LANGUAGE_CODE=en`
-
-둘 다 모호하면 NKRV URL을 우선 선택합니다.
+`BIBLE_TRANSLATION_ID`는 엔트리 URL 선택에 쓰이지 않습니다.  
+ID만 지정하면 경고 없이 다른 소스가 선택될 수 있으므로, `BIBLE_TRANSLATION_TYPE`이나 `--entry-url`을 함께 쓰세요.
 
 ### 번역본 선택
 
@@ -143,15 +158,20 @@ BIBLE_LANGUAGE_CODE=ko
 
 1. 대상 `bible_book`을 `book_order ASC`로 조회합니다.
 2. 소스별 규칙으로 chapter URL 목록을 만듭니다.
-3. 기존 `bible_chapter`를 조회하고 없는 chapter만 insert 합니다.
-4. 각 chapter에서 절을 파싱합니다.
+3. 각 chapter를 요청해 절을 파싱합니다.
+4. 파싱에 성공한 chapter만 `bible_chapter` row를 확보합니다.
 5. 기존 `verse_number`를 조회하고 없는 절만 insert 합니다.
-6. 각 책이 끝나면 `commit`, 실패하면 해당 책만 `rollback` 후 재시도합니다.
+6. **각 chapter가 끝날 때마다 `commit`** 합니다.
+7. 실패하면 진행 중이던 chapter만 `rollback` 되고, 책 단위로 재시도합니다.
+
+즉 chapter row와 그 절들은 같은 트랜잭션에서 커밋됩니다.  
+책 도중에 실패해도 이미 끝난 chapter는 보존되며, 재시도 시 기존 절은 건너뜁니다.
 
 ### 안전 장치
 
-- 어떤 chapter에서도 절이 하나도 파싱되지 않으면 해당 책 전체는 커밋하지 않습니다.
+- 절이 하나도 파싱되지 않은 chapter는 **DB에 쓰기 전에** 건너뜁니다. 빈 chapter row가 남지 않습니다.
 - chapter의 첫 절 번호가 `1`이 아니면 해당 chapter insert를 건너뜁니다.
+- 책 전체에서 절을 하나도 얻지 못하면 오류로 처리합니다. 이 시점에는 커밋된 것이 없습니다.
 - 기존 절 번호가 있으면 중복 insert 하지 않습니다.
 
 ## 지원 소스
@@ -185,6 +205,50 @@ NKRV_ENTRY_URL=https://www.bskorea.or.kr/bible/korbibReadpage.php?version=GAE&bo
 - 레위기 27장: `https://www.bskorea.or.kr/bible/korbibReadpage.php?version=GAE&book=lev&chap=27&sec=1&cVersion=&fontSize=15px&fontWeight=normal`
 - 민수기 1장: `https://www.bskorea.or.kr/bible/korbibReadpage.php?version=GAE&book=num&chap=1&sec=1&cVersion=&fontSize=15px&fontWeight=normal`
 
+### 3. WEB `biblegateway.com`
+
+- URL 규칙: `https://www.biblegateway.com/passage/?search={영문 책명}%20{장 번호}&version=WEB`
+- 책명은 코드 내 66권 영문 책명 상수를 사용합니다. `bible_book.book_key`는 사용하지 않습니다.
+- 장 수는 KJV와 동일한 정경 66권 chapter count를 사용합니다.
+- `version`은 엔트리 URL의 값을 승계하며, 없으면 `WEB`입니다.
+
+권장 엔트리 URL:
+
+```env
+WEB_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=WEB
+```
+
+예:
+
+- 창세기 1장: `https://www.biblegateway.com/passage/?search=Genesis%201&version=WEB`
+- 사무엘상 1장: `https://www.biblegateway.com/passage/?search=1%20Samuel%201&version=WEB`
+- 유다서: `https://www.biblegateway.com/passage/?search=Jude%201&version=WEB`
+
+저장 규칙:
+
+- 절 번호는 화면 표시 숫자가 아니라 `span.text`의 클래스 토큰(`Gen-2-1`)에서 읽습니다.
+- 각주(`[a]`), 상호 참조(`(A)`), 시편 표제(`A Psalm by David.`)는 절 본문에 포함하지 않습니다.
+- 시가 본문에서 여러 조각으로 나뉜 절은 하나로 병합합니다.
+- WEB이 번역하지 않는 4개 구절(Luke 17:36, Acts 8:37, Acts 15:34, Acts 24:7)은 절 번호를 건너뛰지 않고 `(omitted)`로 저장합니다.
+  - 개역개정이 같은 구절을 `(없음)`으로 표기하는 관례를 따른 것입니다.
+  - 덕분에 "절 번호는 1부터 연속"이 불변식이 되어, 구멍이 생기면 곧바로 스크래핑 결함으로 판정할 수 있습니다.
+
+### 4. ASV `biblegateway.com`
+
+WEB과 동일한 어댑터를 사용하며 `version`만 다릅니다. 파서는 공유합니다.
+
+권장 엔트리 URL:
+
+```env
+ASV_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=ASV
+```
+
+WEB과 다른 점:
+
+- ASV는 편집자 소제목(`h3`)과 시편 표제(`h4.psalm-title`)를 함께 사용하며, 둘 다 1절 클래스를 갖습니다. 파서가 제거하므로 절 본문에 섞이지 않습니다.
+- ASV가 본문에서 빼는 절은 스팬 자체가 없어 `(omitted)` 마커가 생성되지 않습니다. 절 번호에 구멍이 생기며, 처리 방향은 설계 문서 7절을 참고하세요.
+- 각주가 WEB보다 3~5배 많습니다.
+
 ## 네트워크와 재시도
 
 - `429`, `502`, `503`, `504` 응답은 자동 재시도합니다.
@@ -192,6 +256,9 @@ NKRV_ENTRY_URL=https://www.bskorea.or.kr/bible/korbibReadpage.php?version=GAE&bo
 - 본문에 `Too Many Requests`, `429 Error` 같은 마커가 있는 200 응답도 재시도 대상으로 처리합니다.
 - 요청 성공 후에는 throttle을 서서히 낮추고, 실패가 누적되면 요청 간 대기 시간을 늘립니다.
 - chapter 간에는 scraper 내부의 polite delay가 적용되고, book 간에는 추가로 5초 대기합니다.
+- BibleGateway는 `robots.txt`에 `Crawl-delay: 15`를 명시하므로, 이 소스에서는 요청 간격 하한이 15초로 강제됩니다.
+  - 생성자에 더 짧은 값을 넘겨도 15초 미만으로 내려가지 않습니다.
+  - 66권 전권 적재는 1,189 요청이며 약 5시간이 걸립니다.
 
 ## 실행 방법
 
@@ -284,6 +351,37 @@ export NKRV_ENTRY_URL="https://www.bskorea.or.kr/bible/korbibReadpage.php?versio
 python3 scrape_bible_to_db.py --test-book 3 --test-chapter 11
 ```
 
+### WEB 실행
+
+```bash
+export BIBLE_TRANSLATION_TYPE=WEB
+export BIBLE_TRANSLATION_NAME="World English Bible"
+export BIBLE_LANGUAGE_CODE=en
+export WEB_ENTRY_URL="https://www.biblegateway.com/passage/?search=Genesis%201&version=WEB"
+python3 scrape_bible_to_db.py --start-book 1 --end-book 5
+```
+
+### ASV 실행
+
+```bash
+export BIBLE_TRANSLATION_TYPE=ASV
+export BIBLE_TRANSLATION_NAME="American Standard Version"
+export BIBLE_LANGUAGE_CODE=en
+export ASV_ENTRY_URL="https://www.biblegateway.com/passage/?search=Genesis%201&version=ASV"
+python3 scrape_bible_to_db.py --entry-url "$ASV_ENTRY_URL" --start-book 1 --end-book 5
+```
+
+### WEB smoke test
+
+```bash
+export WEB_ENTRY_URL="https://www.biblegateway.com/passage/?search=Genesis%201&version=WEB"
+python3 scrape_bible_to_db.py --test-genesis1
+python3 scrape_bible_to_db.py --test-book 19 --test-chapter 119
+python3 scrape_bible_to_db.py --test-book 65 --test-chapter 1
+```
+
+전권 적재 구간 분할과 완료 검증 쿼리는 [설계 문서 11절](docs/world-english-bible-scraping-design.md)에 있습니다.
+
 ## 테스트
 
 ### 기본 실행
@@ -331,10 +429,19 @@ CREATE INDEX idx_verse_chapter_id ON bible_verse(chapter_id);
 
 ### `Source/translation mismatch`
 
-- `thekingsbible.com`에 NKRV 번역본 메타데이터를 붙였거나
-- `bskorea.or.kr?version=GAE`에 KJV 메타데이터를 붙인 경우입니다.
+소스와 번역본 메타데이터가 어긋난 경우입니다. 양방향으로 검사합니다.
+
+- 소스가 요구하는 번역본이 아닌 경우 (예: `?version=ASV`에 WEB 메타데이터)
+- 번역본이 요구하는 소스가 아닌 경우 (예: `thekingsbible.com`에 ASV 메타데이터)
+
+각 번역본의 소스/버전 요건은 `TRANSLATION_SOURCE_REQUIREMENTS` 표에 정의되어 있습니다.
+
+### `Ambiguous entry URL`
+
+- `KJV_ENTRY_URL`과 `WEB_ENTRY_URL`이 함께 설정된 상태에서 `BIBLE_LANGUAGE_CODE=en`만 준 경우입니다.
+- `BIBLE_TRANSLATION_TYPE`을 지정하거나 `--entry-url`을 명시하면 해결됩니다.
 
 ### `Parsed 0 verses across all chapters`
 
 - 해당 책에서 유효한 본문을 하나도 추출하지 못한 경우입니다.
-- 빈 스크랩 결과를 커밋하지 않기 위해 의도적으로 실패 처리합니다.
+- 이 시점에는 커밋된 chapter가 없으며, 빈 스크랩 결과를 남기지 않기 위해 의도적으로 실패 처리합니다.
