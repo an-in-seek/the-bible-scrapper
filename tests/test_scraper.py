@@ -627,7 +627,12 @@ class FakeSession:
 
 
 def _ebible_scraper() -> HolyBibleScraper:
-    return HolyBibleScraper(entry_url=EBIBLE_ENTRY_URL, sleep_min=0.0, sleep_max=0.0)
+    scraper = HolyBibleScraper(entry_url=EBIBLE_ENTRY_URL)
+    # The constructor raises these to the politeness floor; drop them again so the
+    # unit tests do not sleep. Coverage for the floor itself lives in its own test.
+    scraper.sleep_min = 0.0
+    scraper.sleep_max = 0.0
+    return scraper
 
 
 def test_get_source_name_detects_ebible() -> None:
@@ -660,6 +665,13 @@ def test_discover_ebible_chapter_urls_uses_canonical_count() -> None:
     assert len(scraper.discover_chapter_urls_for_book(1)) == 50
     assert len(scraper.discover_chapter_urls_for_book(19)) == 150
     assert len(scraper.discover_chapter_urls_for_book(65)) == 1
+
+
+def test_ebible_source_applies_politeness_delay_floor() -> None:
+    scraper = HolyBibleScraper(entry_url=EBIBLE_ENTRY_URL)
+
+    assert scraper.sleep_min >= 1.0
+    assert scraper.sleep_max >= 2.0
 
 
 def test_parse_verses_from_ebible_page_accumulates_between_markers() -> None:

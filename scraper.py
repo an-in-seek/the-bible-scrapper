@@ -103,6 +103,10 @@ EBIBLE_REMOVABLE_SELECTOR = (
     "a.notemark, span.notemark, span.footnote, span.crossref"
 )
 EBIBLE_BLOCK_TAGS = frozenset({"div", "p", "li", "table", "tr", "blockquote"})
+# ebible.org declares no Crawl-delay, so this is a self-imposed politeness floor for a
+# nonprofit static host rather than a site requirement. A full 66-book load stays well
+# under an hour at this rate.
+EBIBLE_MIN_DELAY_SECONDS = 1.0
 
 
 class RetryableHttpError(RuntimeError):
@@ -137,6 +141,9 @@ class HolyBibleScraper:
         if self._is_biblegateway_source():
             self.sleep_min = max(self.sleep_min, BIBLEGATEWAY_CRAWL_DELAY_SECONDS)
             self.sleep_max = max(self.sleep_max, BIBLEGATEWAY_CRAWL_DELAY_SECONDS + 3.0)
+        elif self._is_ebible_source():
+            self.sleep_min = max(self.sleep_min, EBIBLE_MIN_DELAY_SECONDS)
+            self.sleep_max = max(self.sleep_max, EBIBLE_MIN_DELAY_SECONDS + 1.0)
 
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": DEFAULT_USER_AGENT})
