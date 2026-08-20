@@ -2,18 +2,20 @@
 
 성경 본문을 스크래핑해 PostgreSQL의 `bible_chapter`, `bible_verse`에 적재하는 도구입니다.
 
-현재 기준으로 안정적으로 맞춰진 소스는 아래 4개입니다.
+현재 기준으로 안정적으로 맞춰진 소스는 아래 5개입니다.
 
 - `thekingsbible.com` KJV
 - `bskorea.or.kr` NKRV(`version=GAE`)
 - `biblegateway.com` WEB(`version=WEB`, World English Bible)
 - `biblegateway.com` ASV(`version=ASV`, American Standard Version)
+- `ebible.org` RVR1909(`spaRV1909`, Reina Valera 1909 — 스페인어)
 
 설계 문서:
 
 - NKRV: [docs/nkrv-scraping-design.md](docs/nkrv-scraping-design.md)
 - WEB: [docs/world-english-bible-scraping-design.md](docs/world-english-bible-scraping-design.md)
 - ASV: [docs/american-standard-version-scraping-design.md](docs/american-standard-version-scraping-design.md)
+- RVR1909: [docs/reina-valera-1909-scraping-design.md](docs/reina-valera-1909-scraping-design.md)
 
 ## 주요 특징
 
@@ -39,6 +41,7 @@
 - `docs/nkrv-scraping-design.md`: NKRV 설계 문서
 - `docs/world-english-bible-scraping-design.md`: WEB 설계 문서
 - `docs/american-standard-version-scraping-design.md`: ASV 설계 문서
+- `docs/reina-valera-1909-scraping-design.md`: RVR1909 설계 문서
 
 ## 요구 사항
 
@@ -85,17 +88,19 @@ KJV_ENTRY_URL=https://thekingsbible.com/Bible/1/1
 NKRV_ENTRY_URL=https://www.bskorea.or.kr/bible/korbibReadpage.php?version=GAE&book=gen&chap=1&sec=1&cVersion=&fontSize=15px&fontWeight=normal
 WEB_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=WEB
 ASV_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=ASV
+RVR1909_ENTRY_URL=https://ebible.org/spaRV1909/GEN01.htm
 ```
 
 `--entry-url`를 지정하지 않으면 기본 URL은 아래 순서로 결정됩니다.
 
-1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV`)에 해당하는 환경변수
+1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909`)에 해당하는 환경변수
 2. `BIBLE_TRANSLATION_ID=2` 또는 `BIBLE_TRANSLATION_NAME=개역개정`이면 `NKRV_ENTRY_URL`
 3. `BIBLE_LANGUAGE_CODE`로 좁혀지는 소스가 하나면 그 값
    - `ko` -> `NKRV_ENTRY_URL`
    - `en` -> `KJV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` 중 설정된 것
+   - `es` -> `RVR1909_ENTRY_URL`
 4. 설정된 엔트리 URL이 하나뿐이면 그 값
-5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` 순으로 선택
+5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` 순으로 선택
 6. 아무것도 없으면 내장 기본값 `https://thekingsbible.com/Bible/1/1` 사용
 
 주의: `BIBLE_LANGUAGE_CODE=en`은 더 이상 KJV를 단독으로 지시하지 않습니다.  
@@ -249,6 +254,29 @@ WEB과 다른 점:
 - ASV가 본문에서 빼는 절은 스팬 자체가 없어 `(omitted)` 마커가 생성되지 않습니다. 절 번호에 구멍이 생기며, 처리 방향은 설계 문서 7절을 참고하세요.
 - 각주가 WEB보다 3~5배 많습니다.
 
+### 5. RVR1909 `ebible.org`
+
+- URL 규칙: `https://ebible.org/{역본코드}/{책코드}{장번호}.htm`
+- 책 코드는 USFM 대문자 3자(`GEN`, `PSA`, `3JN`)입니다.
+- **장 번호 자릿수가 책마다 다릅니다.** 시편만 3자리(`PSA023`), 나머지는 2자리(`GEN50`)입니다.
+- 역본 코드는 엔트리 URL의 첫 경로 세그먼트를 승계하므로 다른 eBible 역본에도 재사용됩니다.
+
+권장 엔트리 URL:
+
+```env
+RVR1909_ENTRY_URL=https://ebible.org/spaRV1909/GEN01.htm
+```
+
+저장 규칙:
+
+- 절 본문이 스팬 안에 없어, `span.verse` 마커 사이의 텍스트를 누적합니다.
+- 절 번호는 표시 텍스트가 아니라 `id` 속성(`V12`)에서 읽습니다.
+- 내비게이션(`ul.tnav`), 책 제목(`div.mt`), 저작권 표기는 제외합니다.
+- 보충어(`span.add`)는 본문으로 유지합니다.
+- **시편 표제는 절 본문에 포함됩니다.** 원문이 별도 마크업 없이 1절 안에 넣기 때문이며, WEB/ASV에서 표제를 제외한 것과 다릅니다.
+
+RV1909는 퍼블릭 도메인입니다.
+
 ## 네트워크와 재시도
 
 - `429`, `502`, `503`, `504` 응답은 자동 재시도합니다.
@@ -256,6 +284,7 @@ WEB과 다른 점:
 - 본문에 `Too Many Requests`, `429 Error` 같은 마커가 있는 200 응답도 재시도 대상으로 처리합니다.
 - 요청 성공 후에는 throttle을 서서히 낮추고, 실패가 누적되면 요청 간 대기 시간을 늘립니다.
 - chapter 간에는 scraper 내부의 polite delay가 적용되고, book 간에는 추가로 5초 대기합니다.
+- 응답 `Content-Type`에 charset이 없으면 본문 기반 추정으로 디코딩합니다. eBible이 여기 해당하며, 이 처리가 없으면 스페인어 악센트가 전부 깨집니다.
 - BibleGateway는 `robots.txt`에 `Crawl-delay: 15`를 명시하므로, 이 소스에서는 요청 간격 하한이 15초로 강제됩니다.
   - 생성자에 더 짧은 값을 넘겨도 15초 미만으로 내려가지 않습니다.
   - 66권 전권 적재는 1,189 요청이며 약 5시간이 걸립니다.
