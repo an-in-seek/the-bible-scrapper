@@ -22,6 +22,13 @@ Si encuentra algún error, infórmenos en ...  Public Domain
 - 저작권은 **Public Domain**이므로 수집·적재에 법적 제약이 없다.
 - 그러나 본문은 **차기 개정이 예정된 초안(borrador)**이다. eBible.org는 원본이 갱신되면 HTML을 재생성한다.
 
+응답 헤더가 이를 뒷받침한다. 조사 시점 기준으로 **하루 전에 재생성**되어 있었다.
+
+```
+Last-Modified: Thu, 20 Aug 2026 02:14:48 GMT     (조사일 2026-08-21)
+Content-Type:  text/html                          ← charset 없음, 7.2 참조
+```
+
 이 저장소의 삽입은 **missing-only**(이미 있는 절은 건드리지 않음)라서, **초안이 나중에 수정되어도 재실행으로는 반영되지 않는다.** 이것은 버그가 아니라 멱등성 계약의 결과다. 대응은 [9.3 초안 갱신 문제](#93-초안-갱신-문제--missing-only-삽입의-한계)에 기술한다. RV1909(확정된 1909년 판본)와 근본적으로 다른 성격이므로, **적재 여부 자체를 판단할 때 먼저 고려해야 한다.**
 
 ### 1.3 기존 소스와의 관계
@@ -40,7 +47,7 @@ Si encuentra algún error, infórmenos en ...  Public Domain
 
 ## 2. 결론 먼저
 
-1. **URL 규칙 변경 불필요.** `_build_ebible_url()`은 엔트리 URL 경로의 첫 세그먼트를 역본 코드로 사용하므로, 엔트리 URL만 `https://ebible.org/spablm/GEN01.htm`으로 주면 66권 전 URL이 그대로 생성된다. 66권 × (첫 장·끝 장) 프로브 결과 **실패 0건**.
+1. **URL 규칙 변경 불필요.** `_build_ebible_url()`은 엔트리 URL 경로의 첫 세그먼트를 역본 코드로 사용하므로, 엔트리 URL만 `https://ebible.org/spablm/GEN01.htm`으로 주면 66권 전 URL이 그대로 생성된다. 66권의 첫 장·마지막 장 127개 URL을 실제로 받아본 결과 **실패 0건**이고 전부 `span.verse`를 갖고 있다.
 2. **소스 판별 변경 불필요.** `_is_ebible_source()`는 netloc 기준이라 `spablm`도 `ebible`로 판정된다.
 3. **파서는 수정이 필요했다.** 최초 판단은 "수정 불필요"였으나 오판이었다. RV1909에 없던 `div.d`(시편 표제·이합체 표제)와 `div.sp`(화자 표시)가 **절과 절 사이**에 나타나 앞 절 본문에 섞여 들어간다. 실측 오염: **시편 119편 21개 절, 아가 1장 8개 절**([4.3](#43-함정-1-절-사이-표제가-앞-절에-섞여-들어간다)).
 4. **블록 경계 공백 규칙이 여기서 처음 실제로 필요해진다.** RV1909는 장당 `div.p`가 1개라 한 번도 발동하지 않았지만, SBLM은 산문 장이 `div.p` 7~19개, 시가 장이 `div.q`/`div.q2` 수십 개로 쪼개져 있다. 한 절이 두 블록에 걸치는 사례를 실측했다(창세기 3:13).
@@ -48,7 +55,7 @@ Si encuentra algún error, infórmenos en ...  Public Domain
 6. **정합성 검증에 구멍이 있다.** `TRANSLATION_SOURCE_REQUIREMENTS`의 `version`은 **쿼리스트링에서만** 읽는데 eBible은 역본 코드를 **경로**에 둔다. RV1909와 SBLM 모두 `source="ebible", version=None`이 되어 마지막 방어선이 무력화된다. **SBLM 추가 전에 반드시 고쳐야 한다**([5.4](#54-정합성-검증의-구멍--version이-쿼리스트링에서만-온다)).
 7. `bible_translation.translation_type` CHECK 제약에 **29번째 값 `SBLM`** 추가가 필요하다(현재 28개, 실측).
 8. **책명을 `div.mt`에서 가져오면 안 된다.** 66권 전수 조사 결과 서수가 빠져 **17권이 8개 이름으로 충돌**한다(`1SA`/`2SA` 모두 `Samuel`). 예레미야는 오타(`Jeramías`)까지 있다([6.4](#64-bible_book-66권-시드)).
-9. **미결정: 시편 표제(`div.d`)를 버릴 것인가.** SBLM은 표제를 1절 마커 **앞**의 별도 블록에 두어 파서가 이를 버린다. 반면 이미 적재된 RV1909는 같은 표제를 **1절 본문에 포함**하고 있다. 방치하면 같은 언어의 두 역본이 시편 23:1에서 서로 다른 내용을 담는다([4.7](#47-미결정-시편-표제를-버릴-것인가)).
+9. **시편 표제는 버린다. 추가 작업 없음.** SBLM은 표제를 1절 마커 앞의 별도 블록(`div.d`)에 두어 파서가 이미 버린다. 적재된 5개 역본 중 4개(KJV·NKRV·WEB·ASV)가 같은 처리를 하고 WEB 설계 문서에 결정으로 남아 있다. RVR1909만 표제를 1절에 담고 있는데 **그쪽이 예외다**([4.7](#47-시편-표제는-버린다-기존-결정-승계)).
 
 ---
 
@@ -58,13 +65,16 @@ Si encuentra algún error, infórmenos en ...  Public Domain
 
 | 검증 | 방법 | 결과 |
 | --- | --- | --- |
-| URL 규칙 | 66권 × 1장/마지막 장 = 132개 HEAD/GET | 실패 0건 |
+| URL 규칙 | 66권 × 1장/마지막 장 = **127개** GET (1장짜리 5권은 중복 제외) | 실패 0건, 전부 `span.verse` 보유 |
 | 장 번호 패딩 | `PSA23.htm` vs `PSA023.htm` | 전자 404, 후자 200 |
 | 파싱 정확도 | 8개 장 표본 파싱 | 아래 표 |
 | 표제 오염 | 수정 전/후 파서 결과 diff | 시편 119편 21건, 아가 1장 8건 |
 | RV1909 회귀 | RV1909 9개 장 재파싱 | 변화 없음 |
 | 인코딩 | `div.copyright`, `div.mt`, 본문 악센트 | 정상(`Génesis`, `Jehová`) |
 | 책명 | 66권 1장 전수 조회 → `div.mt`/`ul.tnav`/RV1909 대조 | `div.mt` 사용 불가([7.5](#75-책명-교차-검증-결과)) |
+| `div.d` 분포 | 시편 150편 + 애가·하박국 등 **159개 장 전수** | 절 사이 `div.d`는 시편 119편뿐([4.7](#47-시편-표제는-버린다-기존-결정-승계)) |
+| 정합성 검증 | `get_source_version()` 프로토타입 × 6개 역본 | 6/6 통과([5.4](#54-정합성-검증의-구멍--version이-쿼리스트링에서만-온다)) |
+| 검증 쿼리 | 4개 쿼리를 RV1909(`tid=33`)에 실행 | 전부 실행 성공([7.2](#72-인코딩-검증--이-소스-필수)) |
 | DB 현황 | `bible_translation`/`bible_book`/CHECK 제약 조회 | [6.1](#61-현재-상태-실측) |
 
 표본 파싱 결과(수정 후):
@@ -143,7 +153,7 @@ def _get_ebible_translation_code(self) -> str:
 | `div.p` | 장당 정확히 1개 | 산문 7~19개, **시가 장은 0개** | 블록 경계 공백 필요 |
 | `div.q` / `div.q2` | 미관측 | 시가 장 전반(시편 119편 176개) | 블록 경계 공백 필요 |
 | `div.b` | 미관측 | 연 구분(빈 줄) | 텍스트 없음, 무해 |
-| `div.d` | 미관측 | 시편 표제(1절 앞) · 이합체 표제(절 사이) | **절 사이는 제거 필요**, 1절 앞은 [4.7](#47-미결정-시편-표제를-버릴-것인가) |
+| `div.d` | 미관측 | 시편 표제(1절 앞) · 이합체 표제(절 사이) | **절 사이는 제거 필요**, 1절 앞은 [4.7](#47-시편-표제는-버린다-기존-결정-승계) |
 | `div.sp` | 미관측 | 아가 화자 표시 | **제거 필요** |
 | `a.notemark`+`span.popup` | 관측 | 관측(더 빈번) | 이미 제거 대상 |
 | `span.wj` | 미관측 | 예수 말씀 | **유지해야 함** |
@@ -209,12 +219,65 @@ RV1909는 장당 `div.p`가 1개라 **이 코드가 한 번도 발동하지 않�
 
 `span.wj`는 **예수의 말씀**을 표시하는 서식 태그다. 마가복음 1장에서 6개 관측됐다. 제거 대상이 아니라 **텍스트를 살려야 하는** 태그다. 제거 셀렉터에 절대 넣지 않는다. 파서는 태그를 구분하지 않고 텍스트 노드를 누적하므로 별도 처리 없이 그대로 보존된다.
 
-### 4.7 미결정. 시편 표제를 버릴 것인가
+### 4.7 시편 표제는 버린다 (기존 결정 승계)
 
 `div.d`는 **두 가지 역할을 겸한다.** 이 구분이 [4.3](#43-함정-1-절-사이-표제가-앞-절에-섞여-들어간다)의 결론을 좁힌다.
 
-| 위치 | 내용 | 실측 |
+**시편 150편 전체 + 애가 5장 + 하박국 3장·이사야 38장·사무엘하 22장·출애굽기 15장, 총 159개 장을 전수 조사했다.**
+
+```
+검사 장 수: 159
+div.d 2개 이상:  1건  ->  PSA119  n=22  (1절 앞 1개 + 절 사이 21개)
+절 사이 div.d 가 있는 장: ['PSA119']       <- 시편 119편이 유일
+div.d 없는 장: 42
+```
+
+| 위치 | 내용 | 전수 조사 결과 |
 | --- | --- | --- |
+| 1절 마커 **앞** | 시편 표제(`Salmo de David.`) | `div.d`가 있는 117개 장 전부 |
+| 절 **사이** | 이합체 문자 표제(`ALEF`, `BET` …) | **시편 119편에만** 21개 |
+
+**절 사이에 `div.d`가 오는 장은 시편 119편 하나뿐이다.** 히브리어 이합체 시편인 애가·시편 111·112·145편에도 문자 표제는 붙지 않았다. 나머지 `div.d`는 전부 1절 마커 앞이고, 파서는 첫 마커 이전 텍스트를 누적하지 않으므로(`current is None`) **셀렉터에 넣지 않아도 어차피 버려진다.** 즉 [5.1](#51-scraperpy--제거-셀렉터-확장-유일한-파서-변경)의 셀렉터 확장이 표제를 새로 잃게 만든 것은 아니다.
+
+#### 이미 결정된 사항이다
+
+WEB 설계 문서 "함정 4"에서 같은 문제를 다루고 **표제를 저장하지 않기로 결정**했다. 근거도 그대로 적용된다 — 역본 간 절 본문 정의가 어긋나면 대조 조회가 깨지고, 인쇄본에서도 표제는 절 번호 없는 제목으로 조판된다. SBLM은 표제를 아예 절 마커 **밖**에 두므로 이 결정에 더 잘 들어맞는다.
+
+적재된 5개 역본의 시편 23:1을 실제로 조회하면 결정이 지켜지고 있다.
+
+```
+KJV      The LORD is my shepherd; I shall not want.
+NKRV     여호와는 나의 목자시니 내게 부족함이 없으리로다
+WEB      Yahweh is my shepherd; I shall lack nothing.
+ASV      Jehovah is my shepherd; I shall not want.
+RVR1909  Salmo de David. JEHOVÁ es mi pastor; nada me faltará.   <- 유일한 예외
+```
+
+**5개 중 4개가 표제를 버린다. RVR1909가 표준이 아니라 예외다.** RV1909 소스가 표제를 별도 블록이 아니라 1절 본문 안에 인라인으로 넣어 두어, 파서가 구분할 방법이 없었기 때문이다. SBLM을 RVR1909에 맞추면 나머지 4개와 어긋난다.
+
+**결론: 표제를 버린다(A안).** 현재 구현이 그대로 맞다. 추가 작업 없음.
+
+#### 대안(B안)을 검토했으나 채택하지 않는다
+
+"1절 마커 앞의 `div.d`만 1절에 병합"하는 안을 프로토타입으로 구현해 봤고, **위치 조건만으로는 성립하지 않는다**는 것을 확인했다.
+
+```
+[PSA023] B안 1절: Salmo de David. Yahvé es mi pastor; ...          <- 의도한 동작
+[PSA119] B안 1절: ALEF Bienaventurados los de perfecto camino, ... <- 이합체 표제가 붙는다
+[PSA145] B안 1절: Salmo de alabanza. De David. * Este es un salmo acróstico, en el que ...
+                                              ^^^^ 각주 본문이 새어 들어온다
+```
+
+- 시편 119편의 첫 `div.d`(`ALEF`)도 1절 마커 앞에 있어 **표제와 구분되지 않는다.** "장의 `div.d`가 1개일 때만"처럼 조건을 덧붙여야 한다.
+- 시편 145편 표제에는 `a.notemark` + `span.popup` 각주가 들어 있어, **각주 제거를 먼저 하지 않으면 각주 본문이 본문에 섞인다.**
+
+즉 B안은 "위치 조건 하나 추가"로 끝나지 않는다. 얻는 것이 RVR1909 한 역본과의 표기 일치뿐이라 **비용 대비 이득이 없다.**
+
+#### 대신 남길 것
+
+RVR1909와 SBLM의 시편 1절이 다른 이유는 **스크래핑 실패가 아니라 소스 마크업 차이**다. 나중에 두 역본을 대조하는 사람이 버그로 오인하지 않도록 이 절을 근거로 남긴다.
+
+--- | --- | --- |
 | 1절 마커 **앞** | 시편 표제(`Salmo de David.`) | 표본 8편 전부 |
 | 절 **사이** | 이합체 문자 표제(`ALEF`, `BET` …) | 시편 119편에만 21개 |
 
@@ -373,7 +436,29 @@ def get_source_version(self) -> str | None:
 version = scraper.get_source_version()
 ```
 
-그리고 `TRANSLATION_SOURCE_REQUIREMENTS["RVR1909"]["version"]`을 `None` → `"spaRV1909"`로 바꾼다. 기존 RV1909 엔트리 URL에서 이 함수가 `spaRV1909`를 반환하므로 **하위 호환이 유지된다.** 비교는 대소문자 무시로 한다(`spaRV1909`는 혼합 대소문자).
+그리고 `TRANSLATION_SOURCE_REQUIREMENTS["RVR1909"]["version"]`을 `None` → `"spaRV1909"`로 바꾼다. 기존 RV1909 엔트리 URL에서 이 함수가 `spaRV1909`를 반환하므로 **하위 호환이 유지된다.**
+
+`spaRV1909`는 혼합 대소문자라 비교를 대소문자 무시로 해야 하는데, **비교 지점이 두 곳**이다. 한 곳만 고치면 반대 방향이 통과해 버린다.
+
+```python
+# 방향 1: _expected_translation_type()
+if required_version is None or required_version.lower() == (version or "").lower():
+# 방향 2: validate_source_translation_compatibility() 후반부
+if requirement["version"] is not None and version is not None         and requirement["version"].lower() != version.lower():
+```
+
+**프로토타입으로 5개 소스 6개 역본 전부 검증했다.**
+
+```
+OK  KJV      source=thekingsbible  version=None       -> KJV
+OK  NKRV     source=bskorea        version=GAE        -> NKRV
+OK  WEB      source=biblegateway   version=WEB        -> WEB
+OK  ASV      source=biblegateway   version=ASV        -> ASV
+OK  RVR1909  source=ebible         version=spaRV1909  -> RVR1909
+OK  SBLM     source=ebible         version=spablm     -> SBLM
+```
+
+같은 표에 현재 코드(쿼리스트링만 사용)를 적용하면 `RVR1909`, `SBLM` 두 건이 `None`으로 떨어지고, `RVR1909.version`을 `None`으로 둔 채 SBLM을 추가하면 **둘 다 `RVR1909`로 판정된다.** 선언 순서를 뒤집으면 반대로 둘 다 `SBLM`이 된다. 실행으로 확인했다.
 
 > 이 수정은 CLAUDE.md의 "Adding a new source" 7번(양방향 검증)을 **같은 소스에서 역본이 둘 이상 나오는 경우**로 확장하는 것이다. 문서에도 반영한다.
 
@@ -478,11 +563,24 @@ VALUES ('SBLM', 'Santa Biblia libre para el mundo', 'es');
 eBible은 `Content-Type`에 charset을 선언하지 않고 `<meta>`에만 UTF-8을 둔다. `_request_html()`의 `apparent_encoding` 재디코딩이 없으면 **모든 스페인어 악센트가 깨진다.**
 
 ```sql
--- 깨짐 문자(U+FFFD) 및 전형적 mojibake 패턴 검출
-SELECT COUNT(*) FROM bible_verse v ... WHERE v.text LIKE '%' || U&'\FFFD' || '%'
-   OR v.text LIKE '%Ã%' OR v.text LIKE '%Â%';   -- 기대값 0
--- 악센트가 실제로 들어왔는지 (역방향 확인)
-SELECT COUNT(*) ... WHERE v.text ~ '[áéíóúñÁÉÍÓÚÑ¡¿]';  -- 0이면 실패
+-- mojibake 및 대체 문자(U+FFFD) 검출
+SELECT COUNT(*) FROM public.bible_verse v
+JOIN public.bible_chapter c ON c.id = v.chapter_id
+JOIN public.bible_book b    ON b.id = c.book_id
+WHERE b.translation_id = :tid
+  AND (v.text LIKE '%Ã%' OR v.text LIKE '%Â%'
+       OR v.text LIKE '%' || U&'\FFFD' || '%');
+-- 기대값: 0
+```
+
+```sql
+-- 반대 방향: 스페인어 악센트가 실제로 저장됐는지
+SELECT COUNT(*) FROM public.bible_verse v
+JOIN public.bible_chapter c ON c.id = v.chapter_id
+JOIN public.bible_book b    ON b.id = c.book_id
+WHERE b.translation_id = :tid
+  AND v.text ~ '[áéíóúñÁÉÍÓÚÑ¿¡]';
+-- 기대값: 수천 건 (0이면 인코딩이 깨졌거나 문자가 소실된 것)
 ```
 
 두 방향을 **모두** 확인한다. 앞 쿼리만으로는 "악센트가 전부 사라진" 실패를 잡지 못한다.
@@ -494,20 +592,30 @@ SELECT COUNT(*) ... WHERE v.text ~ '[áéíóúñÁÉÍÓÚÑ¡¿]';  -- 0이면
 시편 119편의 표제 22개는 실측한 값을 그대로 쓴다. 추정으로 적으면 검증이 통과해도 의미가 없다(초안 작성 시 `DÁLET`을 `DALET`, `VAV`를 `VAU`로 잘못 적어 두 개를 놓칠 뻔했다).
 
 ```sql
--- 1) 히브리 알파벳 표제가 절 끝에 남았는지 (시편 119편, 기대값 0행)
-SELECT v.verse_number, RIGHT(v.text, 24) FROM bible_verse v ...
-WHERE b.book_key = 'PSA' AND c.chapter_number = 119
-  AND v.text ~ '(ALEF|BET|GUÍMEL|DÁLET|HE|VAV|ZAIN|HET|TET|YOD|CAF|LÁMED|MEM|NUN'
-            || '|SÁMEC|AYIN|PE|TSADE|COF|RESH|SIN Y SHIN|TAV)\s*$';
+-- 1) 히브리 알파벳 표제가 절 끝에 남았는지 (시편 119편)
+SELECT v.verse_number, RIGHT(v.text, 24) AS tail
+FROM public.bible_verse v
+JOIN public.bible_chapter c ON c.id = v.chapter_id
+JOIN public.bible_book b    ON b.id = c.book_id
+WHERE b.translation_id = :tid
+  AND b.book_key = 'PSA' AND c.chapter_number = 119
+  AND v.text ~ ('(ALEF|BET|GUÍMEL|DÁLET|HE|VAV|ZAIN|HET|TET|YOD|CAF|LÁMED|MEM|NUN'
+             || '|SÁMEC|AYIN|PE|TSADE|COF|RESH|SIN Y SHIN|TAV)\s*$');
+-- 기대값: 0행
 ```
 
 아가의 화자 표시(`Amado`, `Amante`, `Amigos`)는 **일반 본문에도 등장하는 단어**라 단순 검색은 오탐이 난다. 표제는 문장 중간이나 절 끝에 **홀로** 삽입되므로, 앞뒤 문맥으로 좁힌다.
 
 ```sql
--- 2) 화자 표시가 문장 경계에 끼어들었는지 (아가, 기대값 0행)
-SELECT v.verse_number, v.text FROM bible_verse v ...
-WHERE b.book_key = 'SNG'
+-- 2) 화자 표시가 문장 경계에 끼어들었는지 (아가)
+SELECT c.chapter_number, v.verse_number, v.text
+FROM public.bible_verse v
+JOIN public.bible_chapter c ON c.id = v.chapter_id
+JOIN public.bible_book b    ON b.id = c.book_id
+WHERE b.translation_id = :tid
+  AND b.book_key = 'SNG'
   AND v.text ~ '([.!?»]\s+(Amado|Amante|Amigos)\s+[A-ZÁÉÍÓÚÑ¡¿]|(Amado|Amante|Amigos)\s*$)';
+-- 기대값: 0행
 ```
 
 두 쿼리 모두 **[4.3](#43-함정-1-절-사이-표제가-앞-절에-섞여-들어간다)에서 실제로 관측된 오염 형태**를 그대로 겨냥한다. 오탐이 나오면 해당 절 본문을 눈으로 확인한다.
@@ -641,23 +749,24 @@ SBLM은 **개정 중 초안**이다([1.2](#12-라이선스와-초안-표기--이
 
 ## 11. 구현 순서
 
-0. **선행 합의 두 건** — 시편 표제 처리 A/B([4.7](#47-미결정-시편-표제를-버릴-것인가))와 초안 재적재 방침([9.3](#93-초안-갱신-문제--missing-only-삽입의-한계)). 둘 다 적재 후에 번복하면 재적재가 필요하다
+0. **선행 합의 한 건** — 초안 재적재 방침([9.3](#93-초안-갱신-문제--missing-only-삽입의-한계)). 적재 후에 번복하면 지우고 다시 넣어야 한다
 1. `EBIBLE_REMOVABLE_SELECTOR` 확장 + 표제/각주/`wj` 테스트 3종 — **완료**
-2. (0번이 B안이면) 1절 앞 `div.d`를 1절에 병합하는 파서 변경 + 테스트
-3. `get_source_version()` 도입 및 `RVR1909.version = "spaRV1909"` 변경([5.4](#54-정합성-검증의-구멍--version이-쿼리스트링에서만-온다))
-4. 블록 경계 공백 테스트, `spablm` URL 테스트, 정합성 예외 테스트 추가
-5. `SBLM` 역본 등록 5곳([5.3](#53-scrape_bible_to_dbpy--역본-등록))
-6. `translation_type` CHECK 제약 28 → 29([6.2](#62-translation_type-check-제약--29번째-값))
-7. `bible_translation` 행 생성([6.3](#63-bible_translation-row))
-8. 책명 교차 검증 후 `bible_book` 66행 시드([6.4](#64-bible_book-66권-시드))
-9. 창세기 1장 → 창세기 전권 → 66권 순으로 적재
-10. 구조·인코딩·표제 오염·RV1909 대조 검증([7](#7-검증))
-11. README / CLAUDE.md 지원 소스 표 갱신
+2. `get_source_version()` 도입 및 `RVR1909.version = "spaRV1909"` 변경([5.4](#54-정합성-검증의-구멍--version이-쿼리스트링에서만-온다))
+3. 블록 경계 공백 테스트, `spablm` URL 테스트, 정합성 예외 테스트 추가
+4. `SBLM` 역본 등록 5곳([5.3](#53-scrape_bible_to_dbpy--역본-등록))
+5. `translation_type` CHECK 제약 28 → 29([6.2](#62-translation_type-check-제약--29번째-값))
+6. `bible_translation` 행 생성([6.3](#63-bible_translation-row))
+7. 책명 교차 검증 후 `bible_book` 66행 시드([6.4](#64-bible_book-66권-시드))
+8. 창세기 1장 → 창세기 전권 → 66권 순으로 적재
+9. 구조·인코딩·표제 오염·RV1909 대조 검증([7](#7-검증))
+10. README / CLAUDE.md 지원 소스 표 갱신
 
-순서에 두 개의 강제 제약이 있다.
+순서에 강제 제약이 둘 있다.
 
-- **3번은 5번보다 먼저.** 역본을 먼저 등록하면 `_expected_translation_type()`이 첫 일치를 반환하는 탓에 **기존 RV1909 실행이 깨진다.**
-- **0번과 2번은 9번보다 먼저.** missing-only 삽입이라 적재 후 본문 방침을 바꾸면 지우고 다시 넣어야 한다.
+- **2번은 4번보다 먼저.** 역본을 먼저 등록하면 `_expected_translation_type()`이 첫 일치를 반환하는 탓에 **기존 RV1909 실행이 깨진다.**
+- **0번은 8번보다 먼저.** missing-only 삽입이라 적재 후 방침을 바꾸면 지우고 다시 넣어야 한다.
+
+시편 표제 처리는 검토 단계에서 결론이 나서([4.7](#47-시편-표제는-버린다-기존-결정-승계)) 순서에서 빠졌다.
 
 ---
 
@@ -675,9 +784,9 @@ SBLM은 **개정 중 초안**이다([1.2](#12-라이선스와-초안-표기--이
 
 [5.4](#54-정합성-검증의-구멍--version이-쿼리스트링에서만-온다)를 고치지 않고 SBLM을 등록하면 **RV1909 본문이 SBLM 역본에, 또는 그 반대로 적재될 수 있다.** 되돌리는 비용이 크다. → 구현 순서 3번을 선행 조건으로 못박는다.
 
-### 리스크 3-1. 스페인어 역본 간 시편 표제 불일치
+### 리스크 3-1. 스페인어 역본 간 시편 표제 불일치를 버그로 오인
 
-[4.7](#47-미결정-시편-표제를-버릴-것인가). RV1909는 1절에 표제를 담고 SBLM은 버린다. 검증을 전부 통과하므로 나중에 발견하면 원인 추적에 시간이 든다. → 적재 **전에** A/B를 결정하고 문서에 남긴다.
+RV1909는 1절에 표제를 담고 SBLM은 버린다. 검증을 전부 통과하므로 나중에 대조하는 사람이 스크래핑 실패로 오인할 수 있다. → 원인이 **소스 마크업 차이**라는 근거를 [4.7](#47-시편-표제는-버린다-기존-결정-승계)에 남겼다. 코드 변경은 필요 없다.
 
 ### 리스크 4. RV1909 회귀
 
@@ -689,11 +798,12 @@ SBLM은 **개정 중 초안**이다([1.2](#12-라이선스와-초안-표기--이
 
 SBLM 적재는 **소스 추가가 아니라 역본 추가**다. eBible 어댑터가 이미 있으므로 URL·HTTP·인코딩·재시도·resume는 변경 없이 재사용된다.
 
-실제로 필요한 작업은 넷이다.
+실제로 필요한 작업은 셋이다.
 
 1. **파서 제거 셀렉터 확장** — `div.d`/`div.sp` 오염이 실측으로 확인됐고(시편 119편 21건, 아가 1장 8건), 이 오염은 자동 검증을 전부 통과하므로 반드시 선행되어야 한다. **완료.**
 2. **정합성 검증 수정** — 같은 소스에서 역본이 둘이 되는 첫 사례라 `version` 판별이 깨진다. 역본 등록보다 **먼저** 해야 한다.
-3. **시편 표제 방침 결정** — B안이면 파서에 위치 조건을 하나 더 넣는다. 적재 후에는 번복 비용이 크다.
-4. **DB 시드** — CHECK 제약 1개, `bible_translation` 1행, `bible_book` 66행(책명은 `div.mt`가 아니라 적재된 RV1909 값을 재사용). `bible_book_description`은 추가 작업 없음.
+3. **DB 시드** — CHECK 제약 1개, `bible_translation` 1행, `bible_book` 66행(책명은 `div.mt`가 아니라 적재된 RV1909 값을 재사용). `bible_book_description`은 추가 작업 없음.
 
-적재 자체보다 **판단이 필요한 사항 두 가지**가 더 중요하다. 초안 본문을 확정본처럼 저장하게 된다는 점([9.3](#93-초안-갱신-문제--missing-only-삽입의-한계))과, 시편 표제를 버릴지 여부([4.7](#47-미결정-시편-표제를-버릴-것인가))다. 둘 다 missing-only 삽입 때문에 **적재 후 번복하면 지우고 다시 넣어야 한다.** 착수 전에 합의한다.
+시편 표제 처리는 미결정으로 남을 뻔했으나, 적재된 5개 역본을 실제로 조회해 보니 **이미 결정되어 있었다**([4.7](#47-시편-표제는-버린다-기존-결정-승계)). 추가 작업은 없다.
+
+남은 판단 사항은 하나다 — **초안 본문을 확정본처럼 저장하게 된다는 점**([9.3](#93-초안-갱신-문제--missing-only-삽입의-한계)). missing-only 삽입이라 적재 후 번복하면 지우고 다시 넣어야 하므로 착수 전에 합의한다.
