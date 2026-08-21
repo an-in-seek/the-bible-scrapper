@@ -1,6 +1,7 @@
 import os
 
 from models import Book, ChapterPayload, Verse
+from scraper import HolyBibleScraper
 from scrape_bible_to_db import (
     ENTRY_URL_ENV_BY_TRANSLATION_TYPE,
     process_book,
@@ -62,6 +63,12 @@ class FakeConn:
 
 
 class FakeScraper:
+    # Borrow the real version-token logic rather than re-implementing it, so these fakes
+    # cannot drift from production behaviour. They only need `entry_url`.
+    get_source_version = HolyBibleScraper.get_source_version
+    _is_ebible_source = HolyBibleScraper._is_ebible_source
+    _get_ebible_translation_code = HolyBibleScraper._get_ebible_translation_code
+
     def __init__(self, entry_url: str) -> None:
         self.entry_url = entry_url
         self.discover_calls: list[tuple[int, str | None]] = []
@@ -576,12 +583,20 @@ def test_validate_source_translation_compatibility_rejects_unmapped_version_with
 
 
 EBIBLE_RV1909_ENTRY_URL = "https://ebible.org/spaRV1909/GEN01.htm"
+EBIBLE_SBLM_ENTRY_URL = "https://ebible.org/spablm/GEN01.htm"
 
 RVR1909_TRANSLATION_METADATA = {
     "id": 29,
     "language_code": "es",
     "name": "Reina Valera 1909",
     "translation_type": "RVR1909",
+}
+
+SBLM_TRANSLATION_METADATA = {
+    "id": 34,
+    "language_code": "es",
+    "name": "Santa Biblia libre para el mundo",
+    "translation_type": "SBLM",
 }
 
 
@@ -613,6 +628,80 @@ def test_validate_source_translation_compatibility_for_ebible_rvr1909() -> None:
     scraper = EbibleScraper(EBIBLE_RV1909_ENTRY_URL)
 
     validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+
+
+def test_validate_source_translation_compatibility_for_ebible_sblm() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(SBLM_TRANSLATION_METADATA)
+    scraper = EbibleScraper(EBIBLE_SBLM_ENTRY_URL)
+
+    validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+
+
+def test_validate_source_translation_compatibility_rejects_sblm_url_with_rvr1909_metadata() -> None:
+    # eBible serves both translations, so the source name alone cannot tell them apart.
+    # Without the path-derived version token this mismatch would pass silently and load
+    # SBLM text under the RV1909 books.
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(RVR1909_TRANSLATION_METADATA)
+    scraper = EbibleScraper(EBIBLE_SBLM_ENTRY_URL)
+
+    try:
+        validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+    except RuntimeError as exc:
+        assert "Source/translation mismatch" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_validate_source_translation_compatibility_rejects_rvr1909_url_with_sblm_metadata() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(SBLM_TRANSLATION_METADATA)
+    scraper = EbibleScraper(EBIBLE_RV1909_ENTRY_URL)
+
+    try:
+        validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+    except RuntimeError as exc:
+        assert "Source/translation mismatch" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_validate_source_translation_compatibility_ignores_ebible_code_case() -> None:
+    # The RV1909 code is mixed case; a differently-cased URL must still resolve.
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(RVR1909_TRANSLATION_METADATA)
+    scraper = EbibleScraper("https://ebible.org/sparv1909/GEN01.htm")
+
+    validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+
+
+def test_resolve_default_entry_url_is_ambiguous_for_two_spanish_sources() -> None:
+    with _with_entry_url_env({
+        "RVR1909_ENTRY_URL": EBIBLE_RV1909_ENTRY_URL,
+        "SBLM_ENTRY_URL": EBIBLE_SBLM_ENTRY_URL,
+        "BIBLE_LANGUAGE_CODE": "es",
+    }):
+        try:
+            resolve_default_entry_url()
+        except ValueError as exc:
+            assert "Ambiguous entry URL" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")
+
+
+def test_resolve_default_entry_url_picks_sblm_when_translation_type_declared() -> None:
+    with _with_entry_url_env({
+        "RVR1909_ENTRY_URL": EBIBLE_RV1909_ENTRY_URL,
+        "SBLM_ENTRY_URL": EBIBLE_SBLM_ENTRY_URL,
+        "BIBLE_LANGUAGE_CODE": "es",
+        "BIBLE_TRANSLATION_TYPE": "SBLM",
+    }):
+        assert resolve_default_entry_url() == EBIBLE_SBLM_ENTRY_URL
 
 
 def test_validate_source_translation_compatibility_rejects_ebible_with_rvr1960() -> None:

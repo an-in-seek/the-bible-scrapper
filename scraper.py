@@ -91,6 +91,7 @@ BIBLEGATEWAY_INLINE_REMOVABLE_SELECTOR = (
 # "(없음)" convention Korean editions use for the same verses.
 BIBLEGATEWAY_OMITTED_VERSE_TEXT = "(omitted)"
 DEFAULT_EBIBLE_RV1909_ENTRY_URL = "https://ebible.org/spaRV1909/GEN01.htm"
+DEFAULT_EBIBLE_SBLM_ENTRY_URL = "https://ebible.org/spablm/GEN01.htm"
 DEFAULT_EBIBLE_TRANSLATION_CODE = "spaRV1909"
 # Verse markers are `<span class="verse" id="V12">`; the chapter label uses V0.
 EBIBLE_VERSE_ID_PATTERN = re.compile(r"^V(\d{1,3})$")
@@ -172,6 +173,20 @@ class HolyBibleScraper:
         if self._is_ebible_source():
             return "ebible"
         return "generic"
+
+    def get_source_version(self) -> str | None:
+        """
+        Version token identifying which translation this entry URL selects.
+
+        BibleGateway puts it in the query string (?version=WEB), but eBible puts it in
+        the path (/spaRV1909/, /spablm/). Reading only the query string would leave both
+        eBible translations indistinguishable, which silently defeats the source/
+        translation compatibility check once one source serves more than one translation.
+        """
+        if self._is_ebible_source():
+            return self._get_ebible_translation_code()
+        query = dict(parse_qsl(urlparse(self.entry_url or "").query, keep_blank_values=True))
+        return query.get("version")
 
     def parse_verses_from_html(self, html: str) -> list[Verse]:
         soup = BeautifulSoup(html, "html.parser")

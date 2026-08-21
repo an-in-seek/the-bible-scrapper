@@ -21,16 +21,17 @@ ENTRY_URL_ENV_BY_TRANSLATION_TYPE = {
     "WEB": "WEB_ENTRY_URL",
     "ASV": "ASV_ENTRY_URL",
     "RVR1909": "RVR1909_ENTRY_URL",
+    "SBLM": "SBLM_ENTRY_URL",
 }
 # A language code alone does not identify a source: 'en' covers KJV, WEB and ASV.
 TRANSLATION_TYPES_BY_LANGUAGE_CODE = {
     "ko": ("NKRV",),
     "en": ("KJV", "WEB", "ASV"),
-    "es": ("RVR1909",),
+    "es": ("RVR1909", "SBLM"),
 }
 LEGACY_TRANSLATION_TYPE_BY_ID = {"2": "NKRV"}
 # Tie-break when nothing else narrows it down; keeps the pre-WEB default.
-ENTRY_URL_PREFERENCE_ORDER = ("NKRV", "KJV", "WEB", "ASV", "RVR1909")
+ENTRY_URL_PREFERENCE_ORDER = ("NKRV", "KJV", "WEB", "ASV", "RVR1909", "SBLM")
 # Which source may legitimately produce each translation, and how to recognise the
 # translation when bible_translation.translation_type is empty. Drives the
 # source/translation check in both directions, so adding a translation is one row.
@@ -60,9 +61,17 @@ TRANSLATION_SOURCE_REQUIREMENTS = {
         "language_code": "en",
     },
     "RVR1909": {
+        # eBible serves more than one translation, so the version token comes from the
+        # URL path (see HolyBibleScraper.get_source_version), not the query string.
         "source": "ebible",
-        "version": None,
+        "version": "spaRV1909",
         "name": "Reina Valera 1909",
+        "language_code": "es",
+    },
+    "SBLM": {
+        "source": "ebible",
+        "version": "spablm",
+        "name": "Santa Biblia libre para el mundo",
         "language_code": "es",
     },
 }
@@ -289,13 +298,19 @@ def resolve_books(
     return repo.fetch_books(conn, resolved_start, end_book)
 
 
+def _version_matches(required: str | None, actual: str | None) -> bool:
+    """eBible translation codes are mixed case ("spaRV1909"), so compare case-insensitively."""
+    if required is None:
+        return True
+    return actual is not None and required.lower() == actual.lower()
+
+
 def _expected_translation_type(source_name: str, version: str | None) -> str | None:
     """Translation this source/version combination is expected to produce."""
     for translation_type, requirement in TRANSLATION_SOURCE_REQUIREMENTS.items():
         if requirement["source"] != source_name:
             continue
-        required_version = requirement["version"]
-        if required_version is None or required_version == version:
+        if _version_matches(requirement["version"], version):
             return translation_type
     return None
 
@@ -321,9 +336,7 @@ def validate_source_translation_compatibility(
     """
     metadata = repo.get_translation_metadata(conn)
     source_name = scraper.get_source_name()
-    parsed_entry = urlparse(scraper.entry_url)
-    query_params = dict(parse_qsl(parsed_entry.query, keep_blank_values=True))
-    version = query_params.get("version")
+    version = scraper.get_source_version()
 
     translation_type = str(metadata.get("translation_type") or "")
     translation_name = str(metadata.get("name") or "")
@@ -384,7 +397,7 @@ def validate_source_translation_compatibility(
             f"Resolved translation metadata={metadata}"
         )
 
-    if requirement["version"] is not None and version is not None and requirement["version"] != version:
+    if version is not None and not _version_matches(requirement["version"], version):
         raise RuntimeError(
             f"Source/translation mismatch: translation_type={translation_type!r} requires "
             f"version={requirement['version']!r}, but the entry URL uses version={version!r}. "

@@ -761,6 +761,54 @@ def test_parse_verses_from_ebible_page_keeps_words_of_jesus() -> None:
     assert "Venid en pos de mi" in verses[0].text
 
 
+def test_parse_verses_from_ebible_page_joins_verse_across_blocks() -> None:
+    """A verse split over two blocks must join with exactly one space.
+
+    RV1909 puts a whole chapter in one div.p, so this path never ran there. spablm
+    splits prose into many div.p and poetry into div.q/div.q2, and Genesis 3:13 really
+    does straddle a block boundary.
+    """
+    html = """
+    <div class="main">
+      <div class="p"><span class="verse" id="V13">13&nbsp;</span>&#191;Qu&#233; es lo que has hecho?</div>
+      <div class="p">Y dijo la mujer.</div>
+      <div class="q"><span class="verse" id="V14">14&nbsp;</span>Maldita ser&#225;s</div>
+      <div class="q2">entre todas las bestias.</div>
+    </div>
+    """
+    verses = _ebible_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [13, 14]
+    assert verses[0].text == "¿Qué es lo que has hecho? Y dijo la mujer."
+    assert verses[1].text == "Maldita serás entre todas las bestias."
+
+
+def test_ebible_chapter_urls_follow_the_entry_url_translation_code() -> None:
+    """The translation code comes from the entry URL path, so spablm needs no new code."""
+    scraper = HolyBibleScraper(entry_url="https://ebible.org/spablm/GEN01.htm")
+    scraper.sleep_min = 0.0
+    scraper.sleep_max = 0.0
+
+    assert scraper.get_source_name() == "ebible"
+    assert scraper._build_ebible_url(1, 1) == "https://ebible.org/spablm/GEN01.htm"
+    # Psalms pads to three digits; PSA23.htm is a 404.
+    assert scraper._build_ebible_url(19, 23) == "https://ebible.org/spablm/PSA023.htm"
+    assert scraper._build_ebible_url(64, 1) == "https://ebible.org/spablm/3JN01.htm"
+
+
+def test_get_source_version_reads_ebible_code_from_path_and_others_from_query() -> None:
+    def version_for(url: str) -> str | None:
+        scraper = HolyBibleScraper(entry_url=url)
+        scraper.sleep_min = 0.0
+        scraper.sleep_max = 0.0
+        return scraper.get_source_version()
+
+    assert version_for("https://ebible.org/spaRV1909/GEN01.htm") == "spaRV1909"
+    assert version_for("https://ebible.org/spablm/GEN01.htm") == "spablm"
+    assert version_for("https://www.biblegateway.com/passage/?search=Genesis%201&version=ASV") == "ASV"
+    assert version_for("https://thekingsbible.com/Bible/1/1") is None
+
+
 def test_ebible_parser_returns_empty_for_other_sources() -> None:
     scraper = _ebible_scraper()
     soup = BeautifulSoup("<div class='bible_read'><p>1 text</p></div>", "html.parser")
