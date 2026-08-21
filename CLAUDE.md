@@ -15,6 +15,7 @@ Supported sources:
 | `biblegateway.com` (`version=WEB`) | WEB (World English Bible) | Implemented |
 | `biblegateway.com` (`version=ASV`) | ASV (American Standard Version) | Implemented |
 | `ebible.org` (`spaRV1909`) | RVR1909 (Reina Valera 1909, Spanish) | Implemented |
+| `ebible.org` (`spablm`) | SBLM (Santa Biblia libre para el mundo, Spanish) | Implemented |
 
 Design documents:
 
@@ -22,6 +23,7 @@ Design documents:
 - [docs/world-english-bible-scraping-design.md](docs/world-english-bible-scraping-design.md) — WEB
 - [docs/american-standard-version-scraping-design.md](docs/american-standard-version-scraping-design.md) — ASV
 - [docs/reina-valera-1909-scraping-design.md](docs/reina-valera-1909-scraping-design.md) — RVR1909
+- [docs/santa-biblia-libre-para-el-mundo-scraping-design.md](docs/santa-biblia-libre-para-el-mundo-scraping-design.md) — SBLM
 
 ## Common commands
 
@@ -80,6 +82,8 @@ bskorea → biblegateway → ebible → bibletable → chapter-prefixed → orde
 - `h3` / `h4.psalm-title` removal is **not dead code**: ASV tags editorial headings and psalm superscriptions with the verse-1 class, so dropping the rule silently prepends them to verse 1. WEB pages contain no `h3` at all, which is why only the ASV tests cover it.
 - `_extract_verses_from_biblegateway_passage()` reads verse numbers from the `span.text` **class token** (`Gen-2-1`), never from the rendered number: the first verse of a chapter displays the *chapter* number, so Genesis 2:1 would be stored as verse 2. It also merges same-numbered spans instead of deduplicating them (Psalms 23:4 arrives in four fragments) and drops `h4.psalm-title`, which carries the verse-1 class.
 - `_extract_verses_from_ebible_page()` accumulates text **between** `span.verse` markers: on eBible the marker holds only the number and the body follows as sibling nodes. Verse numbers come from the `id` (`V12`), and chapter URLs pad the number per book — Psalms to three digits, everything else to two (`PSA23.htm` is a 404).
+- `EBIBLE_REMOVABLE_SELECTOR` drops `div.d`, `div.qa`, `div.qd`, and `div.sp` because those headings sit **between** verse markers, so the accumulator folds them into the surrounding verse — measured on spablm as 21 leaked verses in Psalms 119 and 8 in Song of Songs 1. The contamination passes every automated check (verse count, contiguity, no empty verses), so only a targeted query or a human catches it. Never drop `div.q`/`div.q2`/`div.b` (they hold poetry text) or `span.wj` (words of Jesus).
+- A `div.d` before the first verse marker is a **psalm superscription**, and it is deliberately not stored — matching KJV, NKRV, WEB, and ASV. RVR1909 is the lone exception only because that source inlines the superscription into verse 1 where the parser cannot separate it. Do not "fix" the difference by prepending it.
 - Leaving eBible pages to the generic parsers is the worst case in this repo: the regex fallback returns a full, contiguous verse list with the number glued into verse 1, so verse-count and contiguity checks both pass.
 - `_request_html()` re-decodes with `apparent_encoding` when `Content-Type` omits a charset. eBible declares UTF-8 only in a `<meta>` tag, and without this every Spanish accent is mojibake. Sources that send a charset are untouched — do not "simplify" this into an unconditional override.
 - The four verses WEB leaves untranslated (Luke 17:36, Acts 8:37, 15:34, 24:7) are stored as `(omitted)` rather than skipped, so contiguous verse numbering stays an invariant and any real gap reads as a scrape failure. The marker is written **only** when the span holds a `sup.footnote` and no body text — never for an arbitrarily empty span, or a DOM change would quietly fill the DB with placeholders instead of failing.
@@ -97,7 +101,7 @@ In `scraper.py`:
 In `scrape_bible_to_db.py`:
 
 6. `resolve_default_entry_url()` / `_is_nkrv_translation_hint()` — entry URL resolution
-7. `TRANSLATION_SOURCE_REQUIREMENTS` — one row per translation, drives `validate_source_translation_compatibility()` in **both** directions (source must produce the translation, and the translation must come from that source). **Last line of defense against mis-loading**
+7. `TRANSLATION_SOURCE_REQUIREMENTS` — one row per translation, drives `validate_source_translation_compatibility()` in **both** directions (source must produce the translation, and the translation must come from that source). **Last line of defense against mis-loading**. The `version` token comes from `HolyBibleScraper.get_source_version()`, not from the URL query string: BibleGateway puts it in the query (`?version=ASV`) but eBible puts it in the path (`/spablm/`). When one source serves several translations, `_expected_translation_type()` returns the **first** matching row, so leaving `version` as `None` silently pins every translation of that source to whichever one is declared first.
 8. `resolve_book_code_for_source()` — per-source book identifier
 
 Skipping step 7 lets, for example, WEB text land under the KJV translation — expensive to undo.
@@ -107,7 +111,7 @@ Skipping step 7 lets, for example, WEB text land under the KJV translation — e
 - `.env` is loaded with `os.environ.setdefault()`, so **shell environment variables win**.
 - Translation resolution order: `BIBLE_TRANSLATION_ID` → lookup by (`BIBLE_TRANSLATION_TYPE`, `BIBLE_TRANSLATION_NAME`, `BIBLE_LANGUAGE_CODE`) → legacy default `translation_id=10`.
 - That **legacy fallback of 10 is a trap**: with no variables set, data is silently written to translation 10.
-- Entry URL comes from `KJV_ENTRY_URL` / `NKRV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` / `RVR1909_ENTRY_URL`. `BIBLE_LANGUAGE_CODE=en` no longer identifies a source on its own — with more than one English URL set, resolution raises rather than guessing. `BIBLE_TRANSLATION_ID` does **not** steer entry-URL selection, so an ID-only run can silently pick the wrong source; pass `BIBLE_TRANSLATION_TYPE` or `--entry-url`.
+- Entry URL comes from `KJV_ENTRY_URL` / `NKRV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` / `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL`. `BIBLE_LANGUAGE_CODE=en` no longer identifies a source on its own — with more than one English URL set, resolution raises rather than guessing. `BIBLE_TRANSLATION_ID` does **not** steer entry-URL selection, so an ID-only run can silently pick the wrong source; pass `BIBLE_TRANSLATION_TYPE` or `--entry-url`.
 - Never hardcode DB credentials (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`).
 
 ### CLI argument constraints

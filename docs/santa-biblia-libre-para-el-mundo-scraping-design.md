@@ -501,13 +501,19 @@ RV1909 때와 동일한 절차를 따른다.
 ### 6.3 `bible_translation` row
 
 ```sql
-INSERT INTO bible_translation (translation_type, name, language_code)
-VALUES ('SBLM', 'Santa Biblia libre para el mundo', 'es');
+INSERT INTO public.bible_translation (translation_type, name, language_code, translation_order)
+SELECT 'SBLM', 'Santa Biblia libre para el mundo', 'es',
+       COALESCE(MAX(translation_order), 0) + 1
+FROM public.bible_translation;
 ```
 
-- `id`는 identity BY DEFAULT이므로 **지정하지 않는다.**
+- **`translation_order`는 NOT NULL이고 기본값이 없다.** 빠뜨리면 삽입이 거부된다. 실제로 처음 시도할 때 여기서 막혔다.
+- `translation_order`는 `id`를 따라가지 않는다. RVR1909는 `id=33`인데 `translation_order=31`이다. **기존 최대값 + 1**을 쓴다.
+- `id`는 identity BY DEFAULT이므로 **지정하지 않는다.** 삽입이 실패해도 시퀀스는 되돌아가지 않으므로 `id`에 빈 번호가 생길 수 있다(기존에도 7~9, 31~32이 비어 있다). 문제 없다.
 - `name`, `translation_type`에 UNIQUE 제약이 있다. 기존 `es` 역본(`LBLA`, `RVR1960`, `RVR1909`)과 충돌하지 않는다.
 - `language_code` CHECK(`ko,en,zh,ja,es,de,la`)에 `es`는 이미 허용된다.
+
+**실측 결과:** `id=35`, `translation_order=32`로 생성됐다.
 
 ### 6.4 `bible_book` 66권 시드
 
@@ -533,6 +539,20 @@ VALUES ('SBLM', 'Santa Biblia libre para el mundo', 'es');
 실측 교차 검증 결과는 [7.5](#75-책명-교차-검증-결과)에 있다.
 
 `book_key`는 기존 역본과 동일한 USFM 코드(`GEN`, `PSA`, `3JN` …)를, `book_order`는 1~66을 쓴다. 약어(`abbreviation`)는 소스에 없으므로 RV1909와 동일한 값을 재사용한다.
+
+`bible_book`은 `abbreviation`과 `testament_type`도 **NOT NULL**이다. RV1909 행을 그대로 복사하면 전부 채워진다.
+
+```sql
+INSERT INTO public.bible_book (translation_id, book_order, book_key, abbreviation, name, testament_type)
+SELECT :new_tid, book_order, book_key, abbreviation, name, testament_type
+FROM public.bible_book
+WHERE translation_id = :rvr1909_tid
+ORDER BY book_order;
+```
+
+`UNIQUE (translation_id, book_key)`와 `UNIQUE (translation_id, book_order)`가 걸려 있어 중복 실행은 자동으로 거부된다.
+
+**실측 결과:** 66권 / `book_key` 66종 / `book_order` 1~66. `ul.tnav` 대조에서 표기 차이 5건이 나왔고 [7.5](#75-책명-교차-검증-결과)의 예측과 정확히 일치했다(식별 불일치 0건).
 
 ### 6.5 `bible_book_description` — 추가 작업 없음
 

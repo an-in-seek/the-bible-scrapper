@@ -43,6 +43,7 @@
 - `docs/world-english-bible-scraping-design.md`: WEB 설계 문서
 - `docs/american-standard-version-scraping-design.md`: ASV 설계 문서
 - `docs/reina-valera-1909-scraping-design.md`: RVR1909 설계 문서
+- `docs/santa-biblia-libre-para-el-mundo-scraping-design.md`: SBLM 설계 문서
 
 ## 요구 사항
 
@@ -297,6 +298,24 @@ RVR1909_ENTRY_URL=https://ebible.org/spaRV1909/GEN01.htm
 - **시편 표제는 절 본문에 포함됩니다.** 원문이 별도 마크업 없이 1절 안에 넣기 때문이며, WEB/ASV에서 표제를 제외한 것과 다릅니다.
 
 RV1909는 퍼블릭 도메인입니다.
+
+### 6. SBLM `ebible.org`
+
+Santa Biblia libre para el mundo. RVR1909와 같은 사이트·같은 렌더러라 URL 규칙과 절 마커 구조가 동일하며, 역본 코드만 다릅니다.
+
+```env
+SBLM_ENTRY_URL=https://ebible.org/spablm/GEN01.htm
+```
+
+RVR1909와 다른 점:
+
+- 한 장이 여러 블록(`div.p`, `div.q`, `div.q2`)으로 쪼개져 있어, 한 절이 블록 경계를 넘어갑니다. 블록이 바뀔 때 공백 하나로 이어 붙입니다.
+- 절과 절 **사이**에 표제가 들어갑니다. 시편 이합체 표제(`div.d`)와 아가 화자 표시(`div.sp`)가 그렇습니다. 제거하지 않으면 앞뒤 절 본문에 섞여 들어가는데, 절 수·번호 연속성 검사를 모두 통과하므로 자동 검증으로는 잡히지 않습니다.
+- **시편 표제는 저장하지 않습니다.** 원문이 표제를 1절 마커 밖의 별도 블록에 두기 때문이며, KJV/NKRV/WEB/ASV와 같은 처리입니다. RVR1909만 표제를 1절에 담고 있습니다.
+- 예수 말씀 서식(`span.wj`)은 본문으로 유지합니다.
+- 각주 마커(`a.notemark`)는 각주 본문(`span.popup`)을 자식으로 품고 있어 함께 제거됩니다.
+
+**본문이 개정 중인 초안입니다.** 페이지 하단에 `Este es un borrador de traducción`이 표기되어 있고 원문이 수시로 갱신됩니다. 적재 이후의 수정은 재실행으로 반영되지 않으므로, [원문이 개정되는 경우](#원문이-개정되는-경우)의 절차를 따르세요. 퍼블릭 도메인입니다.
 
 ## 네트워크와 재시도
 
