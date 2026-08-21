@@ -703,6 +703,64 @@ def test_parse_verses_from_ebible_page_separates_block_boundaries() -> None:
     assert verses[0].text == "primera parte segunda parte"
 
 
+def test_parse_verses_from_ebible_page_drops_headings_between_verses() -> None:
+    # eBible renders acrostic titles (div.d) and speaker labels (div.sp) as blocks that
+    # carry no verse marker. Left in place they append to the PREVIOUS verse: Psalms 119
+    # leaked 20 headings and Song of Songs 1 leaked 7 before these were removed.
+    html = """
+    <div class="main">
+      <div class="chapterlabel" id="V0">119</div>
+      <div class="d">ALEF</div>
+      <div class="q"><span class="verse" id="V1">1&nbsp;</span>primera linea</div>
+      <div class="q2"><span class="verse" id="V2">2&nbsp;</span>segunda linea</div>
+      <div class="d">BET</div>
+      <div class="q"><span class="verse" id="V3">3&nbsp;</span>tercera linea</div>
+      <div class="sp">Amado</div>
+      <div class="q"><span class="verse" id="V4">4&nbsp;</span>cuarta linea</div>
+    </div>
+    """
+    verses = _ebible_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [1, 2, 3, 4]
+    assert verses[1].text == "segunda linea"
+    assert verses[2].text == "tercera linea"
+    assert all("ALEF" not in verse.text for verse in verses)
+    assert all("BET" not in verse.text for verse in verses)
+    assert all("Amado" not in verse.text for verse in verses)
+
+
+def test_parse_verses_from_ebible_page_drops_inline_footnote_popup() -> None:
+    # The footnote marker nests the note body in span.popup inside the verse text.
+    html = """
+    <div class="main">
+      <div class="p">
+        <span class="verse" id="V24">24&nbsp;</span>guardar el camino del arbol de la
+        vida<a href="#FN1" class="notemark">*<span class="popup">Nota al pie que no
+        pertenece al texto biblico.</span></a>
+      </div>
+      <div class="footnote"><p class="f" id="FN1"><span class="ft">Nota al pie.</span></p></div>
+    </div>
+    """
+    verses = _ebible_scraper().parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert verses[0].text.endswith("vida")
+    assert "Nota al pie" not in verses[0].text
+
+
+def test_parse_verses_from_ebible_page_keeps_words_of_jesus() -> None:
+    html = """
+    <div class="main">
+      <div class="p"><span class="verse" id="V17">17&nbsp;</span>Jesus les dijo:
+      <span class="wj">«Venid en pos de mi»</span>.</div>
+    </div>
+    """
+    verses = _ebible_scraper().parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert "Venid en pos de mi" in verses[0].text
+
+
 def test_ebible_parser_returns_empty_for_other_sources() -> None:
     scraper = _ebible_scraper()
     soup = BeautifulSoup("<div class='bible_read'><p>1 text</p></div>", "html.parser")

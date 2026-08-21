@@ -98,8 +98,14 @@ EBIBLE_VERSE_ID_PATTERN = re.compile(r"^V(\d{1,3})$")
 # book name and prev/next links. The USFM heading/note classes were not observed in
 # RV1909 but are emitted by the same renderer for other translations.
 EBIBLE_REMOVABLE_SELECTOR = (
-    "ul.tnav, div.mt, div.mt1, div.mt2, div.ms, div.ms1, div.s, div.s1, div.s2, "
+    "ul.tnav, div.mt, div.mt1, div.mt2, div.mt3, "
+    "div.ms, div.ms1, div.s, div.s1, div.s2, div.sr, div.mr, div.r, "
+    # Headings that appear BETWEEN verses: a psalm/acrostic title (div.d, div.qa) or a
+    # speaker label (div.sp). They carry no verse marker, so the accumulator folds them
+    # into the surrounding verse (spablm Psalms 119 leaks 21, Song of Songs 1 leaks 8).
+    "div.d, div.qa, div.qd, div.sp, "
     "div.chapterlabel, div.footnote, div.copyright, div.navbar, "
+    # The footnote marker nests the note body in span.popup, inside the verse text.
     "a.notemark, span.notemark, span.footnote, span.crossref"
 )
 EBIBLE_BLOCK_TAGS = frozenset({"div", "p", "li", "table", "tr", "blockquote"})
