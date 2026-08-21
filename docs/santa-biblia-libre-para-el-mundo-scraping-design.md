@@ -719,6 +719,101 @@ SBLM은 **개정 중 초안**이다([1.2](#12-라이선스와-초안-표기--이
 
 | 안 | 내용 | 평가 |
 | --- | --- | --- |
+| **A** | **지금 적재하고, 갱신은 수동 재적재** | **채택.** 멱등성 계약을 건드리지 않는다 |
+| B | 적재를 보류하고 확정판을 기다림 | 안전하나 무기한 |
+| C | 갱신 감지 후 덮어쓰기 모드 추가 | missing-only 계약을 바꿔야 한다. 전 소스에 영향 |
+
+**A를 채택한다.** C는 CLAUDE.md의 "missing-only" 계약을 정면으로 바꾸는 변경이라 별도 설계가 필요하고, 이득은 SBLM 한 역본에만 돌아간다.
+
+A의 조건은 **재적재 절차가 실제로 실행 가능해야 한다**는 것이다. 아래에 절차를 고정한다.
+
+#### 9.3.1 1단계. 변경 감지
+
+원문이 바뀌었는지 먼저 확인한다. 두 단계로 나눈다.
+
+**가벼운 확인 (요청 1건).** 서버가 페이지를 언제 재생성했는지 본다.
+
+```bash
+python3 scripts/check_translation_drift.py   --entry-url https://ebible.org/spablm/GEN01.htm --head-only
+```
+
+```
+Last-Modified: Thu, 20 Aug 2026 02:14:48 GMT      SBLM  (초안, 자주 갱신)
+Last-Modified: Sat, 08 Aug 2026 05:52:26 GMT      RV1909 (확정판, 참고용)
+```
+
+`Last-Modified`가 마지막 적재일보다 **뒤**면 2단계로 넘어간다. 다만 이 헤더는 본문이 실제로 바뀌지 않아도 갱신될 수 있으므로 **판단 근거가 아니라 선별 기준**으로만 쓴다.
+
+**정확한 확인 (읽기 전용 전수 대조).** 소스를 다시 파싱해 DB와 절 단위로 비교한다. **DB에 쓰지 않는다.**
+
+```bash
+# 특정 책만
+python3 scripts/check_translation_drift.py --translation-id <tid>   --entry-url https://ebible.org/spablm/GEN01.htm --start-book 1 --end-book 1
+
+# 전권 (약 35분)
+python3 scripts/check_translation_drift.py --translation-id <tid>   --entry-url https://ebible.org/spablm/GEN01.htm
+```
+
+차이가 있으면 절 단위로 DB 값과 소스 값을 나란히 출력하고, **종료 코드 1**로 끝난다(차이 없으면 0). 스크립트는 소스 판별을 `HolyBibleScraper`에 위임하므로 eBible 전용이 아니라 **모든 소스에 쓸 수 있다.**
+
+#### 9.3.2 2단계. 재적재
+
+> **삭제 순서를 반드시 지킨다. `bible_chapter`를 먼저 지우면 절이 고아가 된다.**
+>
+> `bible_chapter`와 `bible_verse`에는 **외래 키 제약이 없다**(실제 조회로 확인). 삭제가 연쇄되지도, 차단되지도 않는다. 장을 먼저 지우면 남은 절은 `chapter_id`로만 연결된 고아가 되어, 책을 경유하는 아래 쿼리로는 **더 이상 찾을 수 없다.**
+
+**(1) 대상 확인.** 추측하지 말고 먼저 조회한다.
+
+```sql
+SELECT t.id, t.translation_type, t.name,
+       COUNT(DISTINCT c.id) AS chapters, COUNT(v.id) AS verses
+FROM public.bible_translation t
+JOIN public.bible_book b    ON b.translation_id = t.id
+LEFT JOIN public.bible_chapter c ON c.book_id = b.id
+LEFT JOIN public.bible_verse v   ON v.chapter_id = c.id
+WHERE t.translation_type = 'SBLM'
+GROUP BY t.id, t.translation_type, t.name;
+```
+
+**(2) 삭제.** 한 트랜잭션에서 **절 → 장** 순으로 지운다. `bible_book`과 `bible_translation`은 **건드리지 않는다**(스크래퍼가 읽기 전용으로 다루는 테이블이다).
+
+```sql
+BEGIN;
+
+DELETE FROM public.bible_verse v
+USING public.bible_chapter c, public.bible_book b
+WHERE v.chapter_id = c.id
+  AND c.book_id = b.id
+  AND b.translation_id = :tid;
+
+DELETE FROM public.bible_chapter c
+USING public.bible_book b
+WHERE c.book_id = b.id
+  AND b.translation_id = :tid;
+
+-- 삭제 건수가 (1)에서 조회한 값과 일치하는지 확인한 뒤에만 COMMIT
+COMMIT;
+```
+
+**(3) 재적재.** 평소와 같다. `sync_identity_sequences()`가 시작 시 시퀀스를 맞추므로 별도 조치가 필요 없다.
+
+```bash
+BIBLE_TRANSLATION_TYPE=SBLM BIBLE_LANGUAGE_CODE=es SBLM_ENTRY_URL=https://ebible.org/spablm/GEN01.htm python3 scrape_bible_to_db.py --start-book 1 --end-book 66
+```
+
+> **`--resume`를 쓰지 않는다.** `--resume`는 절이 하나라도 있는 가장 높은 `book_order` **다음**부터 시작하므로, 부분 삭제 상태에서 쓰면 지운 구간을 건너뛴다.
+
+**(4) 검증.** [7](#7-검증)의 구조·인코딩·표제 오염 검증을 다시 돌린다. 마지막으로 1단계의 전수 대조를 실행해 **차이 0절**을 확인한다.
+
+#### 9.3.3 남겨야 할 기록
+
+재적재는 이력이 DB에 남지 않는다. 다음을 커밋 메시지에 남긴다.
+
+- 적재/재적재 시점의 `Last-Modified` 값
+- 전수 대조가 보고한 차이 절 수
+- 적재 후 장/절 합계
+
+--- | --- | --- |
 | A | 지금 적재하고, 갱신은 수동 재적재 | 단순. 초안임을 DB 밖에서 기억해야 함 |
 | B | 적재를 보류하고 확정판을 기다림 | 안전하나 무기한 |
 | C | 갱신 감지 후 덮어쓰기 모드 추가 | 멱등성 계약을 바꿔야 함. 범위 초과 |
@@ -749,7 +844,7 @@ SBLM은 **개정 중 초안**이다([1.2](#12-라이선스와-초안-표기--이
 
 ## 11. 구현 순서
 
-0. **선행 합의 한 건** — 초안 재적재 방침([9.3](#93-초안-갱신-문제--missing-only-삽입의-한계)). 적재 후에 번복하면 지우고 다시 넣어야 한다
+0. 초안 재적재 방침 — **A안 확정, 절차 문서화 완료**([9.3](#93-초안-갱신-문제--missing-only-삽입의-한계))
 1. `EBIBLE_REMOVABLE_SELECTOR` 확장 + 표제/각주/`wj` 테스트 3종 — **완료**
 2. `get_source_version()` 도입 및 `RVR1909.version = "spaRV1909"` 변경([5.4](#54-정합성-검증의-구멍--version이-쿼리스트링에서만-온다))
 3. 블록 경계 공백 테스트, `spablm` URL 테스트, 정합성 예외 테스트 추가
@@ -764,7 +859,7 @@ SBLM은 **개정 중 초안**이다([1.2](#12-라이선스와-초안-표기--이
 순서에 강제 제약이 둘 있다.
 
 - **2번은 4번보다 먼저.** 역본을 먼저 등록하면 `_expected_translation_type()`이 첫 일치를 반환하는 탓에 **기존 RV1909 실행이 깨진다.**
-- **0번은 8번보다 먼저.** missing-only 삽입이라 적재 후 방침을 바꾸면 지우고 다시 넣어야 한다.
+- **0번은 8번보다 먼저.** missing-only 삽입이라 적재 후 방침을 바꾸면 지우고 다시 넣어야 한다. (해결됨)
 
 시편 표제 처리는 검토 단계에서 결론이 나서([4.7](#47-시편-표제는-버린다-기존-결정-승계)) 순서에서 빠졌다.
 
@@ -772,9 +867,9 @@ SBLM은 **개정 중 초안**이다([1.2](#12-라이선스와-초안-표기--이
 
 ## 12. 리스크
 
-### 리스크 1. 초안 본문 고착 (가장 큼)
+### 리스크 1. 초안 본문 고착
 
-본문이 개정 중인데 missing-only 삽입이라 초기 적재본이 고착된다. → [9.3](#93-초안-갱신-문제--missing-only-삽입의-한계) A안, 재적재 절차를 문서화.
+본문이 개정 중인데 missing-only 삽입이라 초기 적재본이 고착된다. → **완화됨.** A안을 채택하고 [9.3](#93-초안-갱신-문제--missing-only-삽입의-한계)에 변경 감지·삭제·재적재·검증 절차를 고정했다. 변경 감지는 `scripts/check_translation_drift.py`(읽기 전용)로 실행하고, 삭제는 **절 → 장** 순서를 지킨다(외래 키가 없어 순서를 틀리면 절이 고아가 된다).
 
 ### 리스크 2. 미관측 USFM 클래스
 
@@ -804,6 +899,9 @@ SBLM 적재는 **소스 추가가 아니라 역본 추가**다. eBible 어댑터
 2. **정합성 검증 수정** — 같은 소스에서 역본이 둘이 되는 첫 사례라 `version` 판별이 깨진다. 역본 등록보다 **먼저** 해야 한다.
 3. **DB 시드** — CHECK 제약 1개, `bible_translation` 1행, `bible_book` 66행(책명은 `div.mt`가 아니라 적재된 RV1909 값을 재사용). `bible_book_description`은 추가 작업 없음.
 
-시편 표제 처리는 미결정으로 남을 뻔했으나, 적재된 5개 역본을 실제로 조회해 보니 **이미 결정되어 있었다**([4.7](#47-시편-표제는-버린다-기존-결정-승계)). 추가 작업은 없다.
+검토 과정에서 판단 사항 두 건이 나왔고 **둘 다 결론이 났다.**
 
-남은 판단 사항은 하나다 — **초안 본문을 확정본처럼 저장하게 된다는 점**([9.3](#93-초안-갱신-문제--missing-only-삽입의-한계)). missing-only 삽입이라 적재 후 번복하면 지우고 다시 넣어야 하므로 착수 전에 합의한다.
+- 시편 표제 처리는 미결정으로 남을 뻔했으나, 적재된 5개 역본을 실제로 조회해 보니 **이미 결정되어 있었다**([4.7](#47-시편-표제는-버린다-기존-결정-승계)). 추가 작업 없음.
+- 초안 갱신 문제는 **A안(수동 재적재)으로 확정**하고, 실행 가능한 절차를 [9.3](#93-초안-갱신-문제--missing-only-삽입의-한계)에 고정했다. missing-only 멱등성 계약은 그대로 둔다.
+
+**남은 선행 조건은 없다.** 구현은 [11](#11-구현-순서)의 순서대로 진행할 수 있다.

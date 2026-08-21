@@ -30,6 +30,8 @@ pip install -r requirements.txt
 pytest -q                                    # full test suite
 pytest -q -k bskorea                         # single group
 bash scripts/run_tests_wsl.sh                # WSL: create venv, install, run tests
+python3 scripts/check_translation_drift.py --entry-url <URL> --head-only   # source Last-Modified
+python3 scripts/check_translation_drift.py --translation-id <ID> --entry-url <URL>  # read-only diff
 python3 scrape_bible_to_db.py --test-genesis1              # parser-only check, no DB
 python3 scrape_bible_to_db.py --test-book 3 --test-chapter 11
 python3 scrape_bible_to_db.py --start-book 1 --end-book 3  # actual load
@@ -55,6 +57,7 @@ Data flow: read `bible_book` → build per-source chapter URLs → fetch HTML �
 
 - **Never create `bible_book` rows.** The tool assumes all 66 books already exist for the target `translation_id` and only reads them. `bible_translation` is read-only as well.
 - `bible_chapter` / `bible_verse` inserts are **missing-only**, so reruns are idempotent. Any change here needs an accompanying idempotency test.
+- The flip side of missing-only: **a source that revises its text is never corrected by re-running.** Fine for fixed editions, not for drafts. Detect drift with `scripts/check_translation_drift.py` (read-only), then delete and re-load. `bible_chapter` and `bible_verse` carry **no foreign keys**, so deletion must go **verses first, then chapters** — dropping chapters first orphans the verses beyond the reach of any book-scoped query. Do not "fix" this by adding an overwrite mode; that changes the idempotency contract for every source.
 - The transaction boundary is **per chapter**: a chapter row and its verses commit together. A failure mid-book keeps completed chapters and rolls back only the in-flight one; the retry re-processes the book and skips what already landed. Retries are still counted per book (`--book-retries`).
 - `sync_identity_sequences()` runs at startup to align sequences with `MAX(id)`. Skipping it causes duplicate PK errors.
 

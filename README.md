@@ -38,6 +38,7 @@
 - `tests/test_db.py`: 번역본 식별 로직 테스트
 - `tests/test_pipeline.py`: 파이프라인/인자 검증 테스트
 - `scripts/run_tests_wsl.sh`: WSL 테스트 실행 스크립트
+- `scripts/check_translation_drift.py`: 적재된 번역본과 원문을 대조하는 읽기 전용 점검 도구
 - `docs/nkrv-scraping-design.md`: NKRV 설계 문서
 - `docs/world-english-bible-scraping-design.md`: WEB 설계 문서
 - `docs/american-standard-version-scraping-design.md`: ASV 설계 문서
@@ -178,6 +179,26 @@ BIBLE_LANGUAGE_CODE=ko
 - chapter의 첫 절 번호가 `1`이 아니면 해당 chapter insert를 건너뜁니다.
 - 책 전체에서 절을 하나도 얻지 못하면 오류로 처리합니다. 이 시점에는 커밋된 것이 없습니다.
 - 기존 절 번호가 있으면 중복 insert 하지 않습니다.
+
+### 원문이 개정되는 경우
+
+insert가 **없는 절만** 채우는 방식이므로, 원문이 나중에 수정되어도 재실행으로는 반영되지 않습니다.
+확정 판본에는 문제가 없지만, 개정이 진행 중인 소스에서는 최초 적재본이 그대로 남습니다.
+
+원문이 바뀌었는지 확인하려면 `scripts/check_translation_drift.py`를 사용합니다. **DB에 쓰지 않습니다.**
+
+```bash
+# 1) 서버가 페이지를 언제 재생성했는지만 확인 (요청 1건)
+python3 scripts/check_translation_drift.py --entry-url <URL> --head-only
+
+# 2) 원문을 다시 파싱해 DB와 절 단위로 대조 (차이가 있으면 종료 코드 1)
+python3 scripts/check_translation_drift.py --translation-id <ID> --entry-url <URL>   --start-book 1 --end-book 1
+```
+
+차이가 확인되면 해당 번역본의 `bible_verse`와 `bible_chapter`를 지우고 다시 적재해야 합니다.
+`bible_chapter`와 `bible_verse`에는 외래 키 제약이 없으므로 **반드시 절을 먼저 지웁니다.**
+장을 먼저 지우면 절이 고아로 남아 책을 경유하는 쿼리로 찾을 수 없게 됩니다.
+전체 절차는 [docs/santa-biblia-libre-para-el-mundo-scraping-design.md](docs/santa-biblia-libre-para-el-mundo-scraping-design.md) 9.3절에 정리되어 있습니다.
 
 ## 지원 소스
 

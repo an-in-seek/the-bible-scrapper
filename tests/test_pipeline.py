@@ -773,3 +773,53 @@ def test_validate_test_target_args_requires_both_values() -> None:
         assert "--test-book and --test-chapter" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+class _RowCursor:
+    """Minimal psycopg2-like cursor returning a fixed row set."""
+
+    def __init__(self, rows: list[tuple]) -> None:
+        self._rows = rows
+        self.executed: list[tuple] = []
+
+    def __enter__(self) -> "_RowCursor":
+        return self
+
+    def __exit__(self, *_exc) -> bool:
+        return False
+
+    def execute(self, query: str, params=None) -> None:
+        self.executed.append((query, params))
+
+    def fetchall(self) -> list[tuple]:
+        return self._rows
+
+
+class _RowConn:
+    def __init__(self, rows: list[tuple]) -> None:
+        self.cursor_obj = _RowCursor(rows)
+
+    def cursor(self) -> _RowCursor:
+        return self.cursor_obj
+
+
+def test_get_verse_texts_maps_verse_number_to_text() -> None:
+    from db import BibleRepository
+
+    conn = _RowConn([(2, "segundo"), (1, "primero"), (3, "tercero")])
+    repo = BibleRepository(translation_id=33)
+
+    assert repo.get_verse_texts(conn, 4242) == {
+        1: "primero",
+        2: "segundo",
+        3: "tercero",
+    }
+    _query, params = conn.cursor_obj.executed[0]
+    assert params == (4242,)
+
+
+def test_get_verse_texts_returns_empty_dict_for_empty_chapter() -> None:
+    from db import BibleRepository
+
+    repo = BibleRepository(translation_id=33)
+    assert repo.get_verse_texts(_RowConn([]), 1) == {}
