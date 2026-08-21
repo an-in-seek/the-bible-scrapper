@@ -91,22 +91,24 @@ NKRV_ENTRY_URL=https://www.bskorea.or.kr/bible/korbibReadpage.php?version=GAE&bo
 WEB_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=WEB
 ASV_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=ASV
 RVR1909_ENTRY_URL=https://ebible.org/spaRV1909/GEN01.htm
+SBLM_ENTRY_URL=https://ebible.org/spablm/GEN01.htm
 ```
 
 `--entry-url`를 지정하지 않으면 기본 URL은 아래 순서로 결정됩니다.
 
-1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909`)에 해당하는 환경변수
+1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM`)에 해당하는 환경변수
 2. `BIBLE_TRANSLATION_ID=2` 또는 `BIBLE_TRANSLATION_NAME=개역개정`이면 `NKRV_ENTRY_URL`
 3. `BIBLE_LANGUAGE_CODE`로 좁혀지는 소스가 하나면 그 값
    - `ko` -> `NKRV_ENTRY_URL`
    - `en` -> `KJV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` 중 설정된 것
-   - `es` -> `RVR1909_ENTRY_URL`
+   - `es` -> `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` 중 설정된 것
 4. 설정된 엔트리 URL이 하나뿐이면 그 값
-5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` 순으로 선택
+5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` 순으로 선택
 6. 아무것도 없으면 내장 기본값 `https://thekingsbible.com/Bible/1/1` 사용
 
-주의: `BIBLE_LANGUAGE_CODE=en`은 더 이상 KJV를 단독으로 지시하지 않습니다.  
-영어 소스가 둘 이상 설정된 상태에서 `en`만 주면 실행이 중단됩니다.  
+주의: `BIBLE_LANGUAGE_CODE`만으로는 소스가 특정되지 않습니다.  
+`en`(KJV / WEB / ASV)과 `es`(RVR1909 / SBLM) 모두 소스가 둘 이상이라,  
+해당 엔트리 URL이 여러 개 설정된 상태에서 언어 코드만 주면 실행이 중단됩니다.  
 이때는 `BIBLE_TRANSLATION_TYPE`을 지정하거나 `--entry-url`을 명시해야 합니다.
 
 `BIBLE_TRANSLATION_ID`는 엔트리 URL 선택에 쓰이지 않습니다.  

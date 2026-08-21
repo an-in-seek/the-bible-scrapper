@@ -197,9 +197,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--entry-url",
         default=None,
+        # Built from the table so a new translation cannot leave this text stale.
         help=(
-            "Source entry URL (default: env KJV_ENTRY_URL, NKRV_ENTRY_URL, "
-            "WEB_ENTRY_URL, ASV_ENTRY_URL, RVR1909_ENTRY_URL, or built-in default)"
+            "Source entry URL (default: env "
+            + ", ".join(ENTRY_URL_ENV_BY_TRANSLATION_TYPE.values())
+            + ", or built-in default)"
         ),
     )
     parser.add_argument(
