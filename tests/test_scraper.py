@@ -1,6 +1,6 @@
 from bs4 import BeautifulSoup
 
-from scraper import HolyBibleScraper
+from scraper import OMITTED_VERSE_TEXT, HolyBibleScraper
 
 
 def test_parse_verses_with_regex_fallback() -> None:
@@ -807,6 +807,61 @@ def test_get_source_version_reads_ebible_code_from_path_and_others_from_query() 
     assert version_for("https://ebible.org/spablm/GEN01.htm") == "spablm"
     assert version_for("https://www.biblegateway.com/passage/?search=Genesis%201&version=ASV") == "ASV"
     assert version_for("https://thekingsbible.com/Bible/1/1") is None
+
+
+def test_parse_verses_from_ebible_page_marks_footnote_only_verse_as_omitted() -> None:
+    """spablm drops the same verses WEB does, leaving the marker plus a footnote.
+
+    Recording them keeps verse numbering contiguous, so a real gap still reads as a
+    scrape failure rather than a translation choice.
+    """
+    html = """
+    <div class="main">
+      <div class="p"><span class="verse" id="V35">35&nbsp;</span>Dos moler&#225;n juntas.</div>
+      <div class="p"><span class="verse" id="V36">36&nbsp;</span><a href="#FN1" class="notemark">*<span
+        class="popup">Algunos manuscritos griegos a&#241;aden este vers&#237;culo.</span></a></div>
+      <div class="p"><span class="verse" id="V37">37&nbsp;</span>Ellos respondiendo.</div>
+    </div>
+    """
+    verses = _ebible_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [35, 36, 37]
+    assert verses[1].text == OMITTED_VERSE_TEXT
+    assert "manuscritos" not in verses[1].text
+
+
+def test_parse_verses_from_ebible_page_skips_empty_verse_without_footnote() -> None:
+    """No footnote means no evidence of an intentional omission: skip, do not mark.
+
+    Marking every empty span would let a DOM change quietly fill the DB with
+    placeholders instead of failing loudly.
+    """
+    html = """
+    <div class="main">
+      <div class="p"><span class="verse" id="V1">1&nbsp;</span>Primero.</div>
+      <div class="p"><span class="verse" id="V2">2&nbsp;</span></div>
+      <div class="p"><span class="verse" id="V3">3&nbsp;</span>Tercero.</div>
+    </div>
+    """
+    verses = _ebible_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [1, 3]
+
+
+def test_parse_verses_from_ebible_page_keeps_body_text_that_has_a_footnote() -> None:
+    """A footnote alongside real text must not trigger the omitted marker."""
+    html = """
+    <div class="main">
+      <div class="p"><span class="verse" id="V1">1&nbsp;</span>En el principio<a href="#FN1"
+        class="notemark">*<span class="popup">Nota del traductor.</span></a> Dios cre&#243;.</div>
+    </div>
+    """
+    verses = _ebible_scraper().parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert verses[0].text != OMITTED_VERSE_TEXT
+    assert "Nota del traductor" not in verses[0].text
+    assert "En el principio" in verses[0].text
 
 
 def test_ebible_parser_returns_empty_for_other_sources() -> None:

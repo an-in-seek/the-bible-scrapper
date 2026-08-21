@@ -89,7 +89,8 @@ BIBLEGATEWAY_INLINE_REMOVABLE_SELECTOR = (
 # exists but holds only a footnote marker. Recorded explicitly so a gap in the stored
 # verse numbers always means a scrape failure, never a translation choice. Mirrors the
 # "(없음)" convention Korean editions use for the same verses.
-BIBLEGATEWAY_OMITTED_VERSE_TEXT = "(omitted)"
+OMITTED_VERSE_TEXT = "(omitted)"
+BIBLEGATEWAY_OMITTED_VERSE_TEXT = OMITTED_VERSE_TEXT
 DEFAULT_EBIBLE_RV1909_ENTRY_URL = "https://ebible.org/spaRV1909/GEN01.htm"
 DEFAULT_EBIBLE_SBLM_ENTRY_URL = "https://ebible.org/spablm/GEN01.htm"
 DEFAULT_EBIBLE_TRANSLATION_CODE = "spaRV1909"
@@ -105,10 +106,12 @@ EBIBLE_REMOVABLE_SELECTOR = (
     # speaker label (div.sp). They carry no verse marker, so the accumulator folds them
     # into the surrounding verse (spablm Psalms 119 leaks 21, Song of Songs 1 leaks 8).
     "div.d, div.qa, div.qd, div.sp, "
-    "div.chapterlabel, div.footnote, div.copyright, div.navbar, "
-    # The footnote marker nests the note body in span.popup, inside the verse text.
-    "a.notemark, span.notemark, span.footnote, span.crossref"
+    "div.chapterlabel, div.footnote, div.copyright, div.navbar"
 )
+# Removed in a second pass, after omitted verses are detected: an empty verse is only
+# recognisable while its footnote marker is still in the tree. The marker nests the note
+# body in span.popup, inside the verse text, so both go together.
+EBIBLE_FOOTNOTE_SELECTOR = "a.notemark, span.notemark, span.footnote, span.crossref"
 EBIBLE_BLOCK_TAGS = frozenset({"div", "p", "li", "table", "tr", "blockquote"})
 # ebible.org declares no Crawl-delay, so this is a self-imposed politeness floor for a
 # nonprofit static host rather than a site requirement. A full 66-book load stays well
@@ -1031,6 +1034,11 @@ class HolyBibleScraper:
         if working.select_one("span.verse") is None:
             return []
 
+        # Detect before stripping footnotes: the evidence disappears with the marker.
+        omitted = self._collect_ebible_omitted_verses(working)
+        for removable in working.select(EBIBLE_FOOTNOTE_SELECTOR):
+            removable.decompose()
+
         chunks: dict[int, list[str]] = {}
         current: int | None = None
         block_changed = False
@@ -1063,11 +1071,52 @@ class HolyBibleScraper:
             block_changed = False
 
         verses: list[Verse] = []
-        for verse_number, parts in sorted(chunks.items()):
-            text = self._normalize_text("".join(parts).replace(" ", " "))
+        for verse_number in sorted(set(chunks) | omitted):
+            text = self._normalize_text("".join(chunks.get(verse_number, [])).replace(" ", " "))
+            if not text and verse_number in omitted:
+                text = OMITTED_VERSE_TEXT
             if text:
                 verses.append(Verse(verse_number=verse_number, text=text))
         return verses
+
+    @staticmethod
+    def _collect_ebible_omitted_verses(working: BeautifulSoup) -> set[int]:
+        """
+        Verse markers whose whole body is a footnote — the source omits the text.
+
+        spablm drops the same four verses BibleGateway's WEB does (Luke 17:36,
+        Acts 8:37, 15:34, 24:7), emitting the marker plus an `a.notemark` explaining
+        which manuscripts carry it. Recording them as OMITTED_VERSE_TEXT keeps verse
+        numbering contiguous, so a real gap still reads as a scrape failure.
+
+        The footnote is required evidence: an arbitrarily empty span must stay skipped,
+        or a DOM change would quietly fill the DB with placeholders instead of failing.
+        """
+        with_note: set[int] = set()
+        with_body: set[int] = set()
+        current: int | None = None
+
+        for node in working.descendants:
+            if isinstance(node, Tag):
+                classes = node.get("class") or []
+                if node.name == "span" and "verse" in classes:
+                    match = EBIBLE_VERSE_ID_PATTERN.match(node.get("id") or "")
+                    current = int(match.group(1)) if match else None
+                elif current is not None and "notemark" in classes:
+                    with_note.add(current)
+                continue
+
+            if not isinstance(node, NavigableString) or current is None:
+                continue
+            if node.find_parent("span", class_="verse") is not None:
+                continue
+            # Text inside the popup belongs to the note, not to the verse.
+            if node.find_parent(class_="notemark") is not None:
+                continue
+            if str(node).strip():
+                with_body.add(current)
+
+        return with_note - with_body
 
     def _extract_verses_from_bibletable(self, soup: BeautifulSoup) -> list[Verse]:
         """
