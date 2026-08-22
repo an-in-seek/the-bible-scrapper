@@ -44,6 +44,7 @@
 - `docs/american-standard-version-scraping-design.md`: ASV 설계 문서
 - `docs/reina-valera-1909-scraping-design.md`: RVR1909 설계 문서
 - `docs/santa-biblia-libre-para-el-mundo-scraping-design.md`: SBLM 설계 문서
+- `docs/japanese-public-domain-scraping-design.md`: 일본어 퍼블릭 도메인 설계 문서 (미구현)
 
 ## 요구 사항
 

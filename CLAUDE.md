@@ -24,6 +24,7 @@ Design documents:
 - [docs/american-standard-version-scraping-design.md](docs/american-standard-version-scraping-design.md) — ASV
 - [docs/reina-valera-1909-scraping-design.md](docs/reina-valera-1909-scraping-design.md) — RVR1909
 - [docs/santa-biblia-libre-para-el-mundo-scraping-design.md](docs/santa-biblia-libre-para-el-mundo-scraping-design.md) — SBLM
+- [docs/japanese-public-domain-scraping-design.md](docs/japanese-public-domain-scraping-design.md) — 일본어 퍼블릭 도메인 (설계만, 미구현)
 
 ## Common commands
 
