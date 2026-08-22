@@ -36,7 +36,7 @@
 | `創世記(口語訳)` | **著作権侵害のおそれ · 삭제 논의 중** |
 | `詩篇(口語訳)` | **著作権侵害のおそれ · 삭제 논의 중** |
 | `マタイによる福音書(口語訳)` | **삭제 논의 중** |
-| `口語旧約聖書` · `口語新約聖書` (목차) | 삭제 논의 중 |
+| `口語旧約聖書` · `口語新約聖書` (목차) | PD 템플릿이 붙어 있으나 **삭제 논의 중** |
 | `大正改訳新約聖書` | 퍼블릭 도메인 템플릿, 분쟁 없음 |
 | `明治元訳旧約聖書` | 퍼블릭 도메인 템플릿, 분쟁 없음 |
 
@@ -58,6 +58,8 @@
 
 즉 원본이 "저작권 만료가 확인되어"라고 쓴 쪽이 **분쟁 중**이고, "법적으로 티끌 하나 없는"이라고 쓴 쪽이 실제로 깨끗하다.
 
+공정을 기하면, 口語訳 **목차** 문서에는 明治元訳과 같은 퍼블릭 도메인 템플릿이 붙어 있다. 원본 메모의 "저작권 만료" 주장도 아마 이 표기에서 왔을 것이다. 그러나 **실제 본문 문서**(창세기·시편·마태복음)는 저작권 침해 지적을 받아 심사 중이므로, 목차의 템플릿을 근거로 삼을 수 없다. 적재 대상은 목차가 아니라 본문이다.
+
 > **口語訳(1955)은 이 설계에서 채택하지 않는다.** 요청이 "퍼블릭 도메인"인데 배포처 스스로 저작권 침해 여부를 심사 중인 텍스트를 기반으로 삼을 수 없다. 널리 유통된다는 사실은 권리 관계를 증명하지 않는다.
 >
 > 이 문서는 법률 자문이 아니다. 위 내용은 배포처의 표기를 조회한 결과이며, 실제 채택 판단은 사용자 몫이다.
@@ -65,6 +67,13 @@
 ### 1.3 후보 비교와 선택
 
 원본에 없던 세 번째 후보를 조사에서 찾았다. eBible.org가 제공하는 **フリーダム・バイブル(Japanese Freedom Bible, `jpnm`)**이다.
+
+eBible.org의 일본어 항목은 **둘뿐**이며, 나머지 하나는 조건에 맞지 않는다.
+
+| eBible ID | 이름 | 배포 구분 | 판정 |
+| --- | --- | --- | --- |
+| `jpnm` | フリーダム・バイブル | 재배포 가능(`redist`) | 검토 대상 |
+| `jpn1965` | 新改訳新約聖書(1965年版) | **`restricted`** | **제외** — 배포 제한이 걸려 있고 **신약뿐**이라 66권을 채울 수 없다 |
 
 | 후보 | 라이선스 | 소스 | 어댑터 비용 | 문체 | 판정 |
 | --- | --- | --- | --- | --- | --- |
@@ -89,7 +98,7 @@ Language: [jpn] 日本語   ID: JPNMEB or jpnm   public domain
 
 1. **소스·URL·HTTP·인코딩·재시도·resume는 변경 0줄.** `jpnm`은 SBLM/RV1909와 같은 사이트·같은 렌더러다. 엔트리 URL만 `https://ebible.org/jpnm/GEN01.htm`으로 주면 된다. 66권 첫 장 전수 프로브 **실패 0건**.
 2. **파서에 수정이 하나 필요하다.** 블록 경계에 넣는 공백이 **일본어 본문을 오염시킨다.** 표본 505절 중 **250절(49%)**이 영향을 받고, 시가서는 사실상 전부다(시편 119편 176절 중 173절). 일본어는 단어 사이에 공백을 쓰지 않는다([4.3](#43-함정-1-일본어에-없는-공백이-들어간다)).
-3. **생략 절은 추가 작업이 없다.** `jpnm`도 WEB/SBLM과 같은 네 절(눅 17:36, 행 8:37 · 15:34 · 24:7)을 비워 두는데, 직전 작업에서 넣은 `(omitted)` 처리가 **이미 올바르게 동작한다**(실측 확인).
+3. **생략 절 처리는 코드 변경이 없지만 절 목록이 다르다.** `jpnm`은 WEB/SBLM의 네 절(눅 17:36, 행 8:37 · 15:34 · 24:7)에 더해 **롬 16:25도 비워 둔다 — 총 다섯 절**이다. 직전 작업에서 넣은 `(omitted)` 처리가 다섯 건 모두 올바르게 잡는다([4.4](#44-생략-절은-다섯-개다)).
 4. **표제·각주·`span.wj` 규칙도 그대로 적용된다.** `div.d` 22개(시편 119편), `div.sp` 9개(아가 1장), `span.wj` 30개(눅 17장)를 관측했고 현재 셀렉터가 정확히 처리한다.
 5. **책명은 `ul.tnav`에서 가져온다.** `div.mt`는 여기서도 결함이다 — `書` 하나에 5권(수·룻·스·느·에), `福音書` 하나에 4권(마·막·눅·요)이 뭉친다([6.4](#64-bible_book-66권-시드)).
 6. **DB 작업이 SBLM보다 많다.** 일본어 역본이 DB에 하나도 없어서 `bible_book` 66행뿐 아니라 **`bible_book_description`의 `ja` 66행도 신규**다. `language_code` CHECK에 `ja`는 이미 허용되어 있다.
@@ -107,7 +116,9 @@ Language: [jpn] 日本語   ID: JPNMEB or jpnm   public domain
 | DOM 구조 | 10개 장 클래스 집계 | [4.2](#42-dom-구조) |
 | 공백 오염 | 12개 장 505절 정규식 검사 | **250절(49%)** |
 | 제안 수정 | 프로토타입 × 6개 언어 케이스 + 4개 장 | 오염 250 → 0, 타 언어 무영향 |
-| 생략 절 | 4개 장 파싱 | 4건 모두 `(omitted)` 정상 |
+| 생략 절 | 이문이 흔한 **22개 장** 파싱 | **5건** (WEB의 4건 + 롬 16:25), 번호 구멍 0 |
+| 절 수 대조 | 20개 장을 WEB·SBLM·KJV와 비교 | 19/20 WEB 일치, 롬 16장만 +1 |
+| 전각 공백 | 3개 장 원본 U+3000 집계 | 0개 (현재는 무해) |
 | 책명 | 66권 `div.mt` / `ul.tnav` 전수 | `div.mt` 사용 불가 |
 | 후리가나 | 10개 장 `ruby`/`rt`/`rb` 탐색 | **0건** (문제 없음) |
 | DB 현황 | `bible_translation` / `bible_book_description` 조회 | [6.1](#61-현재-상태-실측) |
@@ -126,8 +137,9 @@ Language: [jpn] 日本語   ID: JPNMEB or jpnm   public domain
 | `3JN01` | 14 | 1~14 | `div.p`×7 |
 | `LUK17` | 37 | 1~37 | **`span.wj`×30**, `(omitted)` 1 |
 | `ACT08` | 40 | 1~40 | `(omitted)` 1 |
+| `ROM16` | 25 | 1~25 | `(omitted)` 1 — **WEB보다 1절 많다** |
 
-10개 표본 모두 **1번부터 연속**이고 표제 오염 0건이다.
+11개 표본 모두 **1번부터 연속**이고 표제 오염 0건이다.
 
 ---
 
@@ -210,16 +222,27 @@ elif node.name in EBIBLE_BLOCK_TAGS and current is not None:
 
 **이 오염은 자동 검증을 전부 통과한다.** 절 수도 번호도 정상이고 빈 절도 없다. 전용 쿼리가 없으면 잡히지 않는다([7.3](#73-공백-오염-검증--이-소스-전용)).
 
-### 4.4 생략 절은 추가 작업이 없다
+### 4.4 생략 절은 다섯 개다
 
-`jpnm`도 WEB/SBLM과 같은 네 절을 비워 둔다. 직전 작업에서 넣은 처리가 그대로 동작하는 것을 확인했다.
+**WEB/SBLM과 같은 네 절이라고 단정하면 안 된다.** 본문 이문이 흔한 22개 장을 훑은 결과 `jpnm`은 **다섯 절**을 비워 둔다.
 
 ```
-LUK17:36 -> (omitted) 표기      ACT15:34 -> (omitted) 표기
-ACT08:37 -> (omitted) 표기      ACT24:7  -> (omitted) 표기
+LUK17:36 -> (omitted)      ACT15:34 -> (omitted)      ROM16:25 -> (omitted)
+ACT08:37 -> (omitted)      ACT24:7  -> (omitted)
 ```
 
-판정 근거가 각주의 존재이고 언어와 무관하므로 **코드 변경이 필요 없다.**
+앞의 넷은 WEB/SBLM과 같지만 **롬 16:25는 `jpnm`에만 있다.** WEB/SBLM은 송영을 14:24~26에 두고 16장을 24절에서 끝내는데, `jpnm`은 16:25 마커를 추가로 내보내고 각주만 붙인다.
+
+```
+jpnm   ROM16: 25절 (25절이 (omitted))
+WEB    ROM16: 24절
+SBLM   ROM16: 24절
+KJV    ROM16: 27절
+```
+
+판정 근거가 각주의 존재이고 언어와 무관하므로 **코드 변경은 필요 없다.** 다섯 건 모두 표기되고 22개 장에서 번호 구멍은 0건이었다. 다만 **적재 후 검증에서 기대하는 `(omitted)` 건수를 4가 아니라 5로 잡아야 한다.**
+
+> 전권을 훑은 것이 아니라 이문이 흔한 22개 장만 본 결과다. 나머지 장에 더 있을 수 있으므로 **적재 후 실제 건수를 세어 기록한다**([7.6](#76-생략-절-집계)).
 
 ---
 
@@ -234,10 +257,15 @@ ACT08:37 -> (omitted) 표기      ACT24:7  -> (omitted) 표기
 # Spanish or English verse needs must not survive between two CJK characters.
 # Hangul (U+AC00-D7A3) is deliberately excluded: Korean does space its words.
 CJK_RANGES = "　-〿぀-ヿ㐀-䶿一-鿿＀-￯"
-CJK_JOIN_PATTERN = re.compile(rf"(?<=[{CJK_RANGES}])\s+(?=[{CJK_RANGES}])")
+# ASCII whitespace only. U+3000 (ideographic space) falls inside CJK_RANGES and is
+# content, not a separator: matching \s here would delete the indentation Japanese
+# poetry uses.
+CJK_JOIN_PATTERN = re.compile(rf"(?<=[{CJK_RANGES}])[ \t\r\n]+(?=[{CJK_RANGES}])")
 ```
 
 `_extract_verses_from_ebible_page()`의 정규화 직후에 한 번 적용한다.
+
+> **`\s+`를 쓰면 안 된다.** 이 문서 초안이 그렇게 적었다가 검토에서 잡혔다. 전각 공백 U+3000은 `CJK_RANGES` 안에 있으면서 동시에 `\s`에 걸리므로, `あ　い`가 `あい`로, `あ　　い`가 `あい`로 뭉개진다. `jpnm` 본문에는 현재 U+3000이 0개라 당장 드러나지 않지만, 일본어 조판에서 전각 공백은 들여쓰기로 흔히 쓰이므로 **조용히 내용을 잃는 잠재 버그**다.
 
 **프로토타입 검증 결과** — 언어별 단위 케이스와 실제 데이터 양쪽을 돌렸다.
 
@@ -251,6 +279,10 @@ CJK_JOIN_PATTERN = re.compile(rf"(?<=[{CJK_RANGES}])\s+(?=[{CJK_RANGES}])")
 
 [실측]  PSA023   6절: 오염 6 -> 0        GEN03  24절: 오염 7 -> 0
         PSA119 176절: 오염 173 -> 0      ISA40  31절: 오염 29 -> 0
+
+[전각공백]  あ　い   -> あ　い  (보존)     あ
+ い -> あい  (제거)
+            あ　　い -> あ　　い (보존)
 ```
 
 한글을 범위에서 뺀 것이 핵심이다. 한국어는 단어를 띄어 쓰므로 NKRV 본문에 적용하면 안 된다.
@@ -376,29 +408,41 @@ WEB 설계 문서 11.4와 동일하다.
 
 ### 7.2 인코딩 검증
 
-eBible은 `Content-Type`에 charset을 선언하지 않는다. `_request_html()`의 `apparent_encoding` 재디코딩이 없으면 본문이 깨진다. 스페인어와 달리 **일본어는 깨지면 한눈에 보이지만**, 쿼리로도 확인한다.
+eBible은 `Content-Type`에 charset을 선언하지 않는다. `_request_html()`의 `apparent_encoding` 재디코딩이 없으면 본문이 깨진다.
+
+> **스페인어용 mojibake 쿼리를 그대로 쓰면 안 된다.** 이 문서 초안이 그 실수를 했다. 스페인어 문자는 U+00xx라 UTF-8 2바이트가 `Ã`/`Â`로 보이지만, 일본어는 U+3xxx~U+9xxx라 **3바이트가 `ã`/`ä`/`ç`로 보인다.** 실측으로 확인했다.
+>
+> ```
+> 정상: 主は私の羊飼い。
+> 깨짐: ä¸»ã¯ç§ã®ç¾é£¼ãã
+>       LIKE '%Ã%' -> False    <- 스페인어용 패턴은 안 걸린다
+>       LIKE '%ã%' -> True
+> ```
+>
+> 즉 스페인어 쿼리를 복사해 오면 **전부 깨져도 0을 반환한다.**
+
+가장 확실한 검사는 **일본어 문자가 없는 절을 세는 것**이다. 인코딩이 깨지면 가나·한자가 하나도 남지 않는다.
 
 ```sql
--- mojibake 및 대체 문자 (기대값 0)
+-- 1) 일본어 문자가 하나도 없는 절 (기대값 0)
 SELECT COUNT(*) FROM public.bible_verse v
 JOIN public.bible_chapter c ON c.id = v.chapter_id
 JOIN public.bible_book b    ON b.id = c.book_id
 WHERE b.translation_id = :tid
-  AND (v.text LIKE '%Ã%' OR v.text LIKE '%â%'
+  AND v.text !~ '[぀-ヿ一-鿿]';
+```
+
+```sql
+-- 2) 일본어 mojibake 특유의 3바이트 잔재 (기대값 0)
+SELECT COUNT(*) FROM public.bible_verse v
+JOIN public.bible_chapter c ON c.id = v.chapter_id
+JOIN public.bible_book b    ON b.id = c.book_id
+WHERE b.translation_id = :tid
+  AND (v.text LIKE '%ã%' OR v.text LIKE '%ä%' OR v.text LIKE '%å%'
        OR v.text LIKE '%' || U&'\FFFD' || '%');
 ```
 
-```sql
--- 반대 방향: 일본어 문자가 실제로 저장됐는지 (0이면 실패)
-SELECT COUNT(*) FROM public.bible_verse v
-JOIN public.bible_chapter c ON c.id = v.chapter_id
-JOIN public.bible_book b    ON b.id = c.book_id
-WHERE b.translation_id = :tid
-  AND v.text ~ '[぀-ヿ一-鿿]';
--- 기대값: 3만 건 안팎
-```
-
-두 방향을 **모두** 본다. 앞 쿼리만으로는 문자가 통째로 사라진 실패를 놓친다.
+두 방향을 **모두** 본다. 2번만 보면 문자가 통째로 사라진 실패를 놓치고, 1번만 보면 일부만 깨진 경우를 놓친다.
 
 ### 7.3 공백 오염 검증 — 이 소스 전용
 
@@ -411,7 +455,9 @@ FROM public.bible_verse v
 JOIN public.bible_chapter c ON c.id = v.chapter_id
 JOIN public.bible_book b    ON b.id = c.book_id
 WHERE b.translation_id = :tid
-  AND v.text ~ '[　-〿぀-ヿ一-鿿＀-￯]\s+[　-〿぀-ヿ一-鿿＀-￯]'
+  -- ASCII 공백만 본다. 전각 공백 U+3000 은 CJK 범위 안에 있으면서 내용이므로,
+  -- [[:space:]] 로 잡으면 정상적인 들여쓰기를 오염으로 오탐한다.
+  AND v.text ~ '[　-〿぀-ヿ一-鿿＀-￯][ \t\r\n]+[　-〿぀-ヿ一-鿿＀-￯]'
 LIMIT 50;
 ```
 
@@ -421,9 +467,43 @@ LIMIT 50;
 
 시편 119편(`div.d` 22개)과 아가(`div.sp` 9개)를 확인한다. 일본어판의 표제 문자열은 스페인어와 다르므로 **적재 후 실제 값을 뽑아 쿼리를 만든다.** 추정으로 적으면 통과해도 의미가 없다(SBLM 문서 작성 때 히브리 문자 표제를 `DALET`/`VAU`로 잘못 적어 두 개를 놓칠 뻔했다).
 
-### 7.5 기존 역본 대조
+### 7.5 기존 역본 대조 — WEB을 기준으로 삼는다
 
-같은 DB의 KJV(`translation_id=10`)와 절 번호를 양방향으로 대조한다. **차이가 곧 누락은 아니다** — RV1909 대 SBLM에서 확인했듯 대부분은 절 병합·이동이다. 차이 항목은 인접 절 본문을 눈으로 확인해 분류한다.
+`jpnm`은 WEB·SBLM과 같은 계열이라 **절 구성이 거의 같다.** KJV보다 WEB(`translation_id=22`)이 훨씬 예민한 기준이다.
+
+표본 20개 장의 절 수를 실측 대조했다.
+
+```
+             jpnm  WEB  SBLM  KJV
+ROM14          26   26    26   23     <- WEB 계열은 송영을 14:24~26에 둔다
+ROM16          25   24    24   27     <- jpnm 만 1절 많다 (16:25 = (omitted))
+나머지 18개 장   전부 jpnm = WEB = SBLM
+```
+
+**20장 중 19장이 WEB과 일치하고, 다른 한 장이 롬 16장이다.** 원인은 [4.4](#44-생략-절은-다섯-개다)에서 확인한 다섯 번째 생략 절이다.
+
+따라서 적재 후 기대값은 이렇다.
+
+| 항목 | 기대 |
+| --- | --- |
+| 장 수 | **1,189** (WEB·SBLM과 동일) |
+| 절 수 | **31,103** = WEB/SBLM의 31,102 + 롬 16:25 한 절 |
+| WEB 대비 차이 | **롬 16:25 한 건**이면 정상 |
+
+절 수가 31,103이 아니거나 WEB 대비 차이가 롬 16:25 하나가 아니면 **원인을 밝히기 전에는 적재를 완료로 보지 않는다.** 차이가 곧 누락은 아니지만(RV1909 대 SBLM에서 확인했듯 대부분은 절 병합·이동), 이 소스는 예측이 가능하므로 예측과 다르면 반드시 설명이 붙어야 한다.
+
+### 7.6 생략 절 집계
+
+```sql
+SELECT b.book_key, c.chapter_number, v.verse_number
+FROM public.bible_verse v
+JOIN public.bible_chapter c ON c.id = v.chapter_id
+JOIN public.bible_book b    ON b.id = c.book_id
+WHERE b.translation_id = :tid AND v.text = '(omitted)'
+ORDER BY 1, 2, 3;
+```
+
+**기대: 5행** (눅 17:36, 행 8:37 · 15:34 · 24:7, 롬 16:25). 이문이 흔한 22개 장만 훑은 결과이므로 더 나올 수 있다. 실제 건수를 세어 이 문서와 커밋 메시지에 남긴다.
 
 ---
 
@@ -487,7 +567,7 @@ python3 scripts/check_translation_drift.py --translation-id <tid> --entry-url ht
 - 본문은 `창세기(文語訳)` 형식의 개별 문서에 있고, 목차 문서(`明治元訳旧約聖書`)에서 링크된다. 미작성 문서(빨간 링크) **0건**.
 - **책마다 마크업이 다르다.** 창세기는 절 번호가 본문에 인라인으로 붙고(`1 元始に神天地を創造たまへり`), 시편과 마태복음은 절이 `1:1` 형식의 **개별 섹션 제목**으로 쪼개져 있다.
 - 문서 제목이 USFM 코드에서 유도되지 않는다(`マタイ傳福音書(文語訳)`). 66개를 목차에서 수집해야 한다.
-- 구약 底本은 1937년 인쇄본, 신약은 1950년 인쇄본으로 **판본이 섞인다.**
+- **底本 표기가 문서마다 어긋난다.** 목차(`明治元訳旧約聖書`)는 『舊新約聖書』日本聖書協會 **1937년(昭和12)**을 底本으로 적는데, 정작 본문 문서 `創世記(文語訳)`은 **1953년**, `マタイ傳福音書(文語訳)`은 **1950년**을 적는다. 구약·신약이 다른 인쇄본인 데다 목차와 본문의 표기까지 다르므로, 채택한다면 **底本을 먼저 확정해야 한다.**
 
 따라서 CLAUDE.md의 "Adding a new source" 1~8번을 **전부** 새로 해야 하고, 파서는 책별 구조 분기까지 필요하다. `jpnm`이 어댑터 재사용으로 끝나는 것과 대비된다.
 
@@ -503,7 +583,7 @@ python3 scripts/check_translation_drift.py --translation-id <tid> --entry-url ht
 4. `bible_translation` 행 생성([6.3](#63-bible_translation-row))
 5. `ul.tnav`에서 책명 66개 수집·검증 후 `bible_book` 시드([6.4](#64-bible_book-66권-시드))
 6. 창세기 1장 → 창세기 전권 → 66권 순으로 적재
-7. 구조·인코딩·**공백 오염**·표제 오염·KJV 대조 검증([7](#7-검증))
+7. 구조·인코딩·**공백 오염**·표제 오염·**WEB 대조**·생략 절 집계 검증([7](#7-검증))
 8. `bible_book_description` `ja` 66행 삽입([6.5](#65-bible_book_description--ja-66행-신규))
 9. README / CLAUDE.md 지원 소스 표 갱신
 
@@ -544,7 +624,7 @@ python3 scripts/check_translation_drift.py --translation-id <tid> --entry-url ht
 실제로 필요한 작업은 셋이다.
 
 1. **CJK 공백 제거** — 표본 49%가 영향받는 유일한 파서 변경. 프로토타입으로 타 언어 무영향을 확인했다. 적재보다 **먼저** 해야 한다.
-2. **역본 등록** — 5곳. `version` 토큰이 `jpnm`이라야 eBible 세 번째 역본이 구분된다.
+2. **역본 등록** — 5곳. `version` 토큰이 `jpnm`이라야 eBible 세 번째 역본이 구분된다. 생략 절 처리는 코드 변경이 없지만 **기대 건수가 4가 아니라 5**다(롬 16:25).
 3. **DB 시드** — CHECK 제약 1개, `bible_translation` 1행, `bible_book` 66행(`ul.tnav` 출처), **`bible_book_description` `ja` 66행 신규**. 일본어 역본이 DB에 없어 SBLM보다 작업이 많다.
 
 착수 전 확인이 필요한 사항은 하나다 — **판본 선택**([1.3](#13-후보-비교와-선택)). 나머지는 결론이 나 있다.
