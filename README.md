@@ -44,7 +44,7 @@
 - `docs/american-standard-version-scraping-design.md`: ASV 설계 문서
 - `docs/reina-valera-1909-scraping-design.md`: RVR1909 설계 문서
 - `docs/santa-biblia-libre-para-el-mundo-scraping-design.md`: SBLM 설계 문서
-- `docs/japanese-public-domain-scraping-design.md`: JFB(일본어) 설계 문서
+- `docs/japanese-public-domain-scraping-design.md`: JPNMEB(일본어) 설계 문서
 
 ## 요구 사항
 
@@ -93,20 +93,20 @@ WEB_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=W
 ASV_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=ASV
 RVR1909_ENTRY_URL=https://ebible.org/spaRV1909/GEN01.htm
 SBLM_ENTRY_URL=https://ebible.org/spablm/GEN01.htm
-JFB_ENTRY_URL=https://ebible.org/jpnm/GEN01.htm
+JPNMEB_ENTRY_URL=https://ebible.org/jpnm/GEN01.htm
 ```
 
 `--entry-url`를 지정하지 않으면 기본 URL은 아래 순서로 결정됩니다.
 
-1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JFB`)에 해당하는 환경변수
+1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JPNMEB`)에 해당하는 환경변수
 2. `BIBLE_TRANSLATION_ID=2` 또는 `BIBLE_TRANSLATION_NAME=개역개정`이면 `NKRV_ENTRY_URL`
 3. `BIBLE_LANGUAGE_CODE`로 좁혀지는 소스가 하나면 그 값
    - `ko` -> `NKRV_ENTRY_URL`
    - `en` -> `KJV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` 중 설정된 것
    - `es` -> `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` 중 설정된 것
-   - `ja` -> `JFB_ENTRY_URL`
+   - `ja` -> `JPNMEB_ENTRY_URL`
 4. 설정된 엔트리 URL이 하나뿐이면 그 값
-5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JFB` 순으로 선택
+5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JPNMEB` 순으로 선택
 6. 아무것도 없으면 내장 기본값 `https://thekingsbible.com/Bible/1/1` 사용
 
 주의: `BIBLE_LANGUAGE_CODE`만으로는 소스가 특정되지 않습니다.  
@@ -323,12 +323,12 @@ RVR1909와 다른 점:
 
 **본문이 개정 중인 초안입니다.** 페이지 하단에 `Este es un borrador de traducción`이 표기되어 있고 원문이 수시로 갱신됩니다. 적재 이후의 수정은 재실행으로 반영되지 않으므로, [원문이 개정되는 경우](#원문이-개정되는-경우)의 절차를 따르세요. 퍼블릭 도메인입니다.
 
-### 7. JFB `ebible.org`
+### 7. JPNMEB `ebible.org`
 
 フリーダム・バイブル(Japanese Freedom Bible). RVR1909·SBLM과 같은 사이트·같은 렌더러이며 역본 코드만 다릅니다.
 
 ```env
-JFB_ENTRY_URL=https://ebible.org/jpnm/GEN01.htm
+JPNMEB_ENTRY_URL=https://ebible.org/jpnm/GEN01.htm
 ```
 
 일본어 고유의 처리:

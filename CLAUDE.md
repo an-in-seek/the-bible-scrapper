@@ -16,7 +16,7 @@ Supported sources:
 | `biblegateway.com` (`version=ASV`) | ASV (American Standard Version) | Implemented |
 | `ebible.org` (`spaRV1909`) | RVR1909 (Reina Valera 1909, Spanish) | Implemented |
 | `ebible.org` (`spablm`) | SBLM (Santa Biblia libre para el mundo, Spanish) | Implemented |
-| `ebible.org` (`jpnm`) | JFB (フリーダム・バイブル, Japanese) | Implemented |
+| `ebible.org` (`jpnm`) | JPNMEB (フリーダム・バイブル, Japanese) | Implemented |
 
 Design documents:
 
@@ -25,7 +25,7 @@ Design documents:
 - [docs/american-standard-version-scraping-design.md](docs/american-standard-version-scraping-design.md) — ASV
 - [docs/reina-valera-1909-scraping-design.md](docs/reina-valera-1909-scraping-design.md) — RVR1909
 - [docs/santa-biblia-libre-para-el-mundo-scraping-design.md](docs/santa-biblia-libre-para-el-mundo-scraping-design.md) — SBLM
-- [docs/japanese-public-domain-scraping-design.md](docs/japanese-public-domain-scraping-design.md) — JFB (Japanese)
+- [docs/japanese-public-domain-scraping-design.md](docs/japanese-public-domain-scraping-design.md) — JPNMEB (Japanese)
 
 ## Common commands
 
@@ -115,7 +115,7 @@ Skipping step 7 lets, for example, WEB text land under the KJV translation — e
 - `.env` is loaded with `os.environ.setdefault()`, so **shell environment variables win**.
 - Translation resolution order: `BIBLE_TRANSLATION_ID` → lookup by (`BIBLE_TRANSLATION_TYPE`, `BIBLE_TRANSLATION_NAME`, `BIBLE_LANGUAGE_CODE`) → legacy default `translation_id=10`.
 - That **legacy fallback of 10 is a trap**: with no variables set, data is silently written to translation 10.
-- Entry URL comes from `KJV_ENTRY_URL` / `NKRV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` / `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` / `JFB_ENTRY_URL`. `BIBLE_LANGUAGE_CODE=en` no longer identifies a source on its own — with more than one English URL set, resolution raises rather than guessing. `BIBLE_TRANSLATION_ID` does **not** steer entry-URL selection, so an ID-only run can silently pick the wrong source; pass `BIBLE_TRANSLATION_TYPE` or `--entry-url`.
+- Entry URL comes from `KJV_ENTRY_URL` / `NKRV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` / `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` / `JPNMEB_ENTRY_URL`. `BIBLE_LANGUAGE_CODE=en` no longer identifies a source on its own — with more than one English URL set, resolution raises rather than guessing. `BIBLE_TRANSLATION_ID` does **not** steer entry-URL selection, so an ID-only run can silently pick the wrong source; pass `BIBLE_TRANSLATION_TYPE` or `--entry-url`.
 - Never hardcode DB credentials (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`).
 
 ### CLI argument constraints

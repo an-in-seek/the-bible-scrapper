@@ -114,7 +114,7 @@ Language: [jpn] 日本語   ID: JPNMEB or jpnm   public domain
 | 판본 라이선스 | eBible details, ja.wikisource 6개 문서 조회 | [1.2](#12-원본-문서의-법적-서술은-뒤집혀-있다) |
 | URL 규칙 | 66권 첫 장 · 마지막 장 **127개** GET | 실패 0건, 전부 `span.verse` 보유 |
 | 장 수 | 66권 **마지막 장 + 1**이 404인지 확인 | 66권 전부 404 → 장 수가 `KJV_CHAPTER_COUNTS`와 일치 |
-| 역본 등록 | `JFB` 등록을 시뮬레이션해 URL 해석·역본 판별 실행 | [5.2](#52-scrape_bible_to_dbpy--역본-등록) |
+| 역본 등록 | `JPNMEB` 등록을 시뮬레이션해 URL 해석·역본 판별 실행 | [5.2](#52-scrape_bible_to_dbpy--역본-등록) |
 | DOM 구조 | 10개 장 클래스 집계 | [4.2](#42-dom-구조) |
 | 공백 오염 | 12개 장 505절 정규식 검사 | **250절(49%)** |
 | 제안 수정 | 프로토타입 × 6개 언어 케이스 + 4개 장 | 오염 250 → 0, 타 언어 무영향 |
@@ -310,12 +310,12 @@ CJK_JOIN_PATTERN = re.compile(rf"(?<=[{CJK_RANGES}])[ \t\r\n]+(?=[{CJK_RANGES}])
 SBLM과 같은 5곳이다. 소스는 이미 있으므로 역본 등록만 하면 된다.
 
 ```python
-ENTRY_URL_ENV_BY_TRANSLATION_TYPE = { ..., "JFB": "JFB_ENTRY_URL" }
-TRANSLATION_TYPES_BY_LANGUAGE_CODE = { ..., "ja": ("JFB",) }
-ENTRY_URL_PREFERENCE_ORDER = (..., "SBLM", "JFB")
+ENTRY_URL_ENV_BY_TRANSLATION_TYPE = { ..., "JPNMEB": "JPNMEB_ENTRY_URL" }
+TRANSLATION_TYPES_BY_LANGUAGE_CODE = { ..., "ja": ("JPNMEB",) }
+ENTRY_URL_PREFERENCE_ORDER = (..., "SBLM", "JPNMEB")
 TRANSLATION_SOURCE_REQUIREMENTS = {
     ...,
-    "JFB": {
+    "JPNMEB": {
         "source": "ebible",
         "version": "jpnm",          # 경로에서 오는 토큰
         "name": "フリーダム・バイブル",
@@ -326,12 +326,12 @@ TRANSLATION_SOURCE_REQUIREMENTS = {
 
 `version`이 `"jpnm"`인 점이 중요하다. eBible에서 세 번째 역본이므로, `get_source_version()`이 경로 토큰을 돌려주지 않으면 세 역본이 서로 구분되지 않는다. 이 장치는 SBLM 작업에서 이미 들어가 있다.
 
-`translation_type` 값은 `JFB`(Japanese Freedom Bible)를 제안한다. 기존 값 29개와 충돌하지 않고, `jpnm`은 소스 코드라 역본 식별자로는 부적절하다.
+`translation_type` 값은 `JPNMEB`(Japanese Freedom Bible)를 제안한다. 기존 값 29개와 충돌하지 않고, `jpnm`은 소스 코드라 역본 식별자로는 부적절하다.
 
 `scraper.py`에 기본 엔트리 URL 상수도 추가한다.
 
 ```python
-DEFAULT_EBIBLE_JFB_ENTRY_URL = "https://ebible.org/jpnm/GEN01.htm"
+DEFAULT_EBIBLE_JPNMEB_ENTRY_URL = "https://ebible.org/jpnm/GEN01.htm"
 ```
 
 `ja`는 언어별 역본이 하나뿐이라 `BIBLE_LANGUAGE_CODE=ja` 단독 지정으로도 해석된다(`en`/`es`와 달리 모호하지 않다).
@@ -340,12 +340,12 @@ DEFAULT_EBIBLE_JFB_ENTRY_URL = "https://ebible.org/jpnm/GEN01.htm"
 
 ```
 [엔트리 URL 해석]
-  OK  ja 단독 (JFB만 설정)        -> https://ebible.org/jpnm/GEN01.htm
+  OK  ja 단독 (JPNMEB만 설정)        -> https://ebible.org/jpnm/GEN01.htm
   OK  ja + es 동시 설정           -> https://ebible.org/jpnm/GEN01.htm   (모호하지 않다)
-  OK  TYPE=JFB 명시               -> https://ebible.org/jpnm/GEN01.htm
+  OK  TYPE=JPNMEB 명시               -> https://ebible.org/jpnm/GEN01.htm
 
 [역본 판별 — eBible 세 역본이 구분되는가]
-  OK  jpnm       -> JFB
+  OK  jpnm       -> JPNMEB
   OK  spablm     -> SBLM
   OK  spaRV1909  -> RVR1909
 ```
@@ -361,7 +361,7 @@ DEFAULT_EBIBLE_JFB_ENTRY_URL = "https://ebible.org/jpnm/GEN01.htm"
 ```
 [bible_translation]        29행. 언어 분포: ko 6 / en 17 / es 4 / de 1 / la 1
                            일본어 역본 0건
-[translation_type CHECK]   29개 값, 'JFB' 없음
+[translation_type CHECK]   29개 값, 'JPNMEB' 없음
 [bible_book_description]   en 66 / es 66 / ko 66      <- ja 없음
 [bible_book]               translation_id 1, 2, 10, 22, 23, 33, 35
 [language_code CHECK]      ko, en, zh, ja, es, de, la  <- ja 허용됨
@@ -374,14 +374,14 @@ DEFAULT_EBIBLE_JFB_ENTRY_URL = "https://ebible.org/jpnm/GEN01.htm"
 RVR1909(27→28), SBLM(28→29) 때와 동일한 절차다.
 
 1. `pg_get_constraintdef()`로 **현재 정의를 프로그램으로 읽어** 값 목록을 추출한다. 손으로 다시 타이핑하지 않는다.
-2. 목록에 `'JFB'`를 더해 제약을 재생성한다.
+2. 목록에 `'JPNMEB'`를 더해 제약을 재생성한다.
 3. 재생성 후 값 개수가 **29 → 30**인지, 기존 29개가 모두 남았는지 확인한다.
 
 ### 6.3 `bible_translation` row
 
 ```sql
 INSERT INTO public.bible_translation (translation_type, name, language_code, translation_order)
-SELECT 'JFB', 'フリーダム・バイブル', 'ja',
+SELECT 'JPNMEB', 'フリーダム・バイブル', 'ja',
        COALESCE(MAX(translation_order), 0) + 1
 FROM public.bible_translation;
 ```
@@ -568,12 +568,12 @@ ORDER BY 1, 2, 3;
 
 ```bash
 # 파서만 확인 (DB 미접속)
-JFB_ENTRY_URL=https://ebible.org/jpnm/GEN01.htm BIBLE_TRANSLATION_TYPE=JFB \
+JPNMEB_ENTRY_URL=https://ebible.org/jpnm/GEN01.htm BIBLE_TRANSLATION_TYPE=JPNMEB \
 python3 scrape_bible_to_db.py --test-book 19 --test-chapter 119
 
 # 전권
-BIBLE_TRANSLATION_ID=<tid> BIBLE_TRANSLATION_TYPE=JFB BIBLE_LANGUAGE_CODE=ja \
-JFB_ENTRY_URL=https://ebible.org/jpnm/GEN01.htm \
+BIBLE_TRANSLATION_ID=<tid> BIBLE_TRANSLATION_TYPE=JPNMEB BIBLE_LANGUAGE_CODE=ja \
+JPNMEB_ENTRY_URL=https://ebible.org/jpnm/GEN01.htm \
 python3 scrape_bible_to_db.py --start-book 1 --end-book 66
 ```
 
@@ -623,7 +623,7 @@ python3 scripts/check_translation_drift.py --translation-id <tid> --entry-url ht
 **전 항목 완료** (2026-08-23). 결과는 [12.5](#125-적재-결과-실측).
 
 1. ✅ CJK 공백 제거 + 테스트 4종([5.1](#51-scraperpy--cjk-공백-제거-유일한-파서-변경), [8](#8-테스트-설계)) — 한국어 회귀 테스트 포함
-2. ✅ `JFB` 역본 등록 5곳 + `jpnm` URL/정합성 테스트([5.2](#52-scrape_bible_to_dbpy--역본-등록))
+2. ✅ `JPNMEB` 역본 등록 5곳 + `jpnm` URL/정합성 테스트([5.2](#52-scrape_bible_to_dbpy--역본-등록))
 3. ✅ `translation_type` CHECK 제약 29 → 30([6.2](#62-translation_type-check-제약--30번째-값))
 4. ✅ `bible_translation` 행 생성 — `id=36`, `translation_order=33`([6.3](#63-bible_translation-row))
 5. ✅ `ul.tnav`에서 책명 66개 수집·검증 후 `bible_book` 시드([6.4](#64-bible_book-66권-시드))
@@ -677,7 +677,7 @@ python3 scripts/check_translation_drift.py --translation-id <tid> --entry-url ht
 | `(omitted)` 표기 | 5 | **5** |
 | WEB 대비 차이 | 롬 16:25 한 건 | **한 건** |
 
-**[7.5](#75-기존-역본-대조--web을-기준으로-삼는다)의 예측이 그대로 맞았다.** 절 수 31,103, WEB에만 있는 절 0건, JFB에만 있는 절은 롬 16:25 하나다. 생략 절 5건의 위치도 [4.4](#44-생략-절은-다섯-개다)에서 예고한 그대로였다.
+**[7.5](#75-기존-역본-대조--web을-기준으로-삼는다)의 예측이 그대로 맞았다.** 절 수 31,103, WEB에만 있는 절 0건, JPNMEB에만 있는 절은 롬 16:25 하나다. 생략 절 5건의 위치도 [4.4](#44-생략-절은-다섯-개다)에서 예고한 그대로였다.
 
 ```
 (omitted) 표기 위치: ACT 8:37 · ACT 15:34 · ACT 24:7 · LUK 17:36 · ROM 16:25

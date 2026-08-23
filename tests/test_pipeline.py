@@ -584,7 +584,7 @@ def test_validate_source_translation_compatibility_rejects_unmapped_version_with
 
 EBIBLE_RV1909_ENTRY_URL = "https://ebible.org/spaRV1909/GEN01.htm"
 EBIBLE_SBLM_ENTRY_URL = "https://ebible.org/spablm/GEN01.htm"
-EBIBLE_JFB_ENTRY_URL = "https://ebible.org/jpnm/GEN01.htm"
+EBIBLE_JPNMEB_ENTRY_URL = "https://ebible.org/jpnm/GEN01.htm"
 
 RVR1909_TRANSLATION_METADATA = {
     "id": 29,
@@ -593,11 +593,11 @@ RVR1909_TRANSLATION_METADATA = {
     "translation_type": "RVR1909",
 }
 
-JFB_TRANSLATION_METADATA = {
+JPNMEB_TRANSLATION_METADATA = {
     "id": 36,
     "language_code": "ja",
     "name": "フリーダム・バイブル",
-    "translation_type": "JFB",
+    "translation_type": "JPNMEB",
 }
 
 SBLM_TRANSLATION_METADATA = {
@@ -715,8 +715,8 @@ def test_resolve_default_entry_url_picks_sblm_when_translation_type_declared() -
 def test_validate_source_translation_compatibility_for_ebible_jfb() -> None:
     repo = FakeRepo()
     conn = FakeConn()
-    conn.translation_metadata = dict(JFB_TRANSLATION_METADATA)
-    scraper = EbibleScraper(EBIBLE_JFB_ENTRY_URL)
+    conn.translation_metadata = dict(JPNMEB_TRANSLATION_METADATA)
+    scraper = EbibleScraper(EBIBLE_JPNMEB_ENTRY_URL)
 
     validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
 
@@ -724,10 +724,10 @@ def test_validate_source_translation_compatibility_for_ebible_jfb() -> None:
 def test_validate_source_translation_compatibility_separates_three_ebible_translations() -> None:
     """eBible now serves three translations, so the path token has to tell them apart."""
     pairs = [
-        (EBIBLE_JFB_ENTRY_URL, SBLM_TRANSLATION_METADATA),
-        (EBIBLE_JFB_ENTRY_URL, RVR1909_TRANSLATION_METADATA),
-        (EBIBLE_SBLM_ENTRY_URL, JFB_TRANSLATION_METADATA),
-        (EBIBLE_RV1909_ENTRY_URL, JFB_TRANSLATION_METADATA),
+        (EBIBLE_JPNMEB_ENTRY_URL, SBLM_TRANSLATION_METADATA),
+        (EBIBLE_JPNMEB_ENTRY_URL, RVR1909_TRANSLATION_METADATA),
+        (EBIBLE_SBLM_ENTRY_URL, JPNMEB_TRANSLATION_METADATA),
+        (EBIBLE_RV1909_ENTRY_URL, JPNMEB_TRANSLATION_METADATA),
     ]
     for entry_url, metadata in pairs:
         repo = FakeRepo()
@@ -744,11 +744,11 @@ def test_validate_source_translation_compatibility_separates_three_ebible_transl
 
 def test_resolve_default_entry_url_picks_jfb_for_japanese() -> None:
     with _with_entry_url_env({
-        "JFB_ENTRY_URL": EBIBLE_JFB_ENTRY_URL,
+        "JPNMEB_ENTRY_URL": EBIBLE_JPNMEB_ENTRY_URL,
         "SBLM_ENTRY_URL": EBIBLE_SBLM_ENTRY_URL,
         "BIBLE_LANGUAGE_CODE": "ja",
     }):
-        assert resolve_default_entry_url() == EBIBLE_JFB_ENTRY_URL
+        assert resolve_default_entry_url() == EBIBLE_JPNMEB_ENTRY_URL
 
 
 def test_validate_source_translation_compatibility_rejects_ebible_with_rvr1960() -> None:

@@ -93,7 +93,7 @@ OMITTED_VERSE_TEXT = "(omitted)"
 BIBLEGATEWAY_OMITTED_VERSE_TEXT = OMITTED_VERSE_TEXT
 DEFAULT_EBIBLE_RV1909_ENTRY_URL = "https://ebible.org/spaRV1909/GEN01.htm"
 DEFAULT_EBIBLE_SBLM_ENTRY_URL = "https://ebible.org/spablm/GEN01.htm"
-DEFAULT_EBIBLE_JFB_ENTRY_URL = "https://ebible.org/jpnm/GEN01.htm"
+DEFAULT_EBIBLE_JPNMEB_ENTRY_URL = "https://ebible.org/jpnm/GEN01.htm"
 DEFAULT_EBIBLE_TRANSLATION_CODE = "spaRV1909"
 # Verse markers are `<span class="verse" id="V12">`; the chapter label uses V0.
 EBIBLE_VERSE_ID_PATTERN = re.compile(r"^V(\d{1,3})$")
