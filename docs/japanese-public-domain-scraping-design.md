@@ -96,7 +96,7 @@ Language: [jpn] 日本語   ID: JPNMEB or jpnm   public domain
 
 ## 2. 결론 먼저
 
-1. **소스·URL·HTTP·인코딩·재시도·resume는 변경 0줄.** `jpnm`은 SBLM/RV1909와 같은 사이트·같은 렌더러다. 엔트리 URL만 `https://ebible.org/jpnm/GEN01.htm`으로 주면 된다. 66권 첫 장 전수 프로브 **실패 0건**.
+1. **소스·URL·HTTP·인코딩·재시도·resume는 변경 0줄.** `jpnm`은 SBLM/RV1909와 같은 사이트·같은 렌더러다. 엔트리 URL만 `https://ebible.org/jpnm/GEN01.htm`으로 주면 된다. 66권 첫 장·마지막 장 127개 프로브 **실패 0건**이고, 마지막 장 + 1은 66권 전부 404라 **장 수가 `KJV_CHAPTER_COUNTS`와 정확히 일치한다**(= 1,189장).
 2. **파서에 수정이 하나 필요하다.** 블록 경계에 넣는 공백이 **일본어 본문을 오염시킨다.** 표본 505절 중 **250절(49%)**이 영향을 받고, 시가서는 사실상 전부다(시편 119편 176절 중 173절). 일본어는 단어 사이에 공백을 쓰지 않는다([4.3](#43-함정-1-일본어에-없는-공백이-들어간다)).
 3. **생략 절 처리는 코드 변경이 없지만 절 목록이 다르다.** `jpnm`은 WEB/SBLM의 네 절(눅 17:36, 행 8:37 · 15:34 · 24:7)에 더해 **롬 16:25도 비워 둔다 — 총 다섯 절**이다. 직전 작업에서 넣은 `(omitted)` 처리가 다섯 건 모두 올바르게 잡는다([4.4](#44-생략-절은-다섯-개다)).
 4. **표제·각주·`span.wj` 규칙도 그대로 적용된다.** `div.d` 22개(시편 119편), `div.sp` 9개(아가 1장), `span.wj` 30개(눅 17장)를 관측했고 현재 셀렉터가 정확히 처리한다.
@@ -112,7 +112,9 @@ Language: [jpn] 日本語   ID: JPNMEB or jpnm   public domain
 | 검증 | 방법 | 결과 |
 | --- | --- | --- |
 | 판본 라이선스 | eBible details, ja.wikisource 6개 문서 조회 | [1.2](#12-원본-문서의-법적-서술은-뒤집혀-있다) |
-| URL 규칙 | 66권 첫 장 GET | 실패 0건, 전부 `span.verse` 보유 |
+| URL 규칙 | 66권 첫 장 · 마지막 장 **127개** GET | 실패 0건, 전부 `span.verse` 보유 |
+| 장 수 | 66권 **마지막 장 + 1**이 404인지 확인 | 66권 전부 404 → 장 수가 `KJV_CHAPTER_COUNTS`와 일치 |
+| 역본 등록 | `JFB` 등록을 시뮬레이션해 URL 해석·역본 판별 실행 | [5.2](#52-scrape_bible_to_dbpy--역본-등록) |
 | DOM 구조 | 10개 장 클래스 집계 | [4.2](#42-dom-구조) |
 | 공백 오염 | 12개 장 505절 정규식 검사 | **250절(49%)** |
 | 제안 수정 | 프로토타입 × 6개 언어 케이스 + 4개 장 | 오염 250 → 0, 타 언어 무영향 |
@@ -319,6 +321,22 @@ DEFAULT_EBIBLE_JFB_ENTRY_URL = "https://ebible.org/jpnm/GEN01.htm"
 ```
 
 `ja`는 언어별 역본이 하나뿐이라 `BIBLE_LANGUAGE_CODE=ja` 단독 지정으로도 해석된다(`en`/`es`와 달리 모호하지 않다).
+
+위 등록을 **시뮬레이션해 실제로 돌려봤다.** 표만 갈아끼우고 `resolve_default_entry_url()`과 `_expected_translation_type()`을 호출한 결과다.
+
+```
+[엔트리 URL 해석]
+  OK  ja 단독 (JFB만 설정)        -> https://ebible.org/jpnm/GEN01.htm
+  OK  ja + es 동시 설정           -> https://ebible.org/jpnm/GEN01.htm   (모호하지 않다)
+  OK  TYPE=JFB 명시               -> https://ebible.org/jpnm/GEN01.htm
+
+[역본 판별 — eBible 세 역본이 구분되는가]
+  OK  jpnm       -> JFB
+  OK  spablm     -> SBLM
+  OK  spaRV1909  -> RVR1909
+```
+
+스키마 제약도 확인했다. `bible_translation.name`은 255자, `bible_book.abbreviation`도 255자라 일본어 이름이 들어간다. `フリーダム・バイブル`는 기존 29개 역본과 **이름 충돌 0건**이다. 다만 `bible_book.book_key`는 **4자 제한**이므로 USFM 코드(최대 3자)를 그대로 쓴다.
 
 ---
 
@@ -545,7 +563,16 @@ python3 scrape_bible_to_db.py --start-book 1 --end-book 66
 
 ### 9.3 초안 갱신 문제
 
-`jpnm`은 `これは翻訳の草案です`로 표기된 **개정 중 초안**이고, 조사 시점 `Last-Modified`는 `2026-08-19`였다. 이 저장소의 삽입은 missing-only라 적재 이후의 수정은 재실행으로 반영되지 않는다.
+`jpnm`은 `これは翻訳の草案です`로 표기된 **개정 중 초안**이다. 조사 시점(2026-08-23) 기준 갱신 표기는 두 곳에서 서로 다르니 구분해서 봐야 한다.
+
+```
+details 페이지 표기        : 2026-08-19            (배포 빌드 날짜)
+HTTP Last-Modified 헤더    : Thu, 20 Aug 2026 01:35:18 GMT   (실제 파일 갱신)
+```
+
+**재적재 판단에는 HTTP 헤더를 쓴다.** details 페이지 날짜는 배포 단위라 개별 파일의 갱신 시점과 어긋난다. 참고로 같은 시점 spablm은 `Thu, 20 Aug 2026 02:14:48 GMT`로, 두 초안이 같은 배치에서 재생성된 것으로 보인다.
+
+이 저장소의 삽입은 missing-only라 적재 이후의 수정은 재실행으로 반영되지 않는다.
 
 SBLM에서 확정한 **A안(수동 재적재)** 절차를 그대로 따른다. 절차와 도구는 이미 있다.
 
