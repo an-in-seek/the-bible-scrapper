@@ -359,13 +359,16 @@ def _fetch_jpnbible_chapter_soup(self, url: str) -> BeautifulSoup:
         html = self._request_html(page_url)          # the only HTTP call per book
         self._jpnbible_chapters = self._split_jpnbible_book(html)
         self._jpnbible_page_url = page_url
+    # The fragment is a string; _split_jpnbible_book keys by the same string, not
+    # by int. Mixing the two makes every lookup miss and every chapter come back
+    # empty, which surfaces only as "book yielded no verses" once per book.
     chapter_html = self._jpnbible_chapters.get(fragment, "")
     return BeautifulSoup(chapter_html, "html.parser")
 ```
 
-`_split_jpnbible_book()`은 `main.book` 바로 아래 `div[id]`를 장 번호로 삼아 `{번호: HTML}`을 만든다. 파싱은 책당 한 번이고, 이후 장마다 작은 조각만 다시 파싱한다.
+`_split_jpnbible_book()`은 `main.book` 바로 아래 `div[id]`를 장 번호로 삼아 `{"1": HTML, "2": HTML, …}`을 만든다. **키는 `div`의 `id` 문자열 그대로 쓴다.** 파싱은 책당 한 번이고, 이후 장마다 작은 조각만 다시 파싱한다.
 
-- 캐시가 비었거나 해당 장이 없으면 **빈 soup**을 돌려준다. 절 0개 → 기존 빈 데이터 가드가 그대로 잡아 **쓰기 전에** 건너뛴다.
+- 캐시가 비었거나 해당 장이 없으면 **빈 soup**을 돌려준다. 절 0개 → 기존 빈 데이터 가드가 그대로 잡아 **쓰기 전에** 건너뛴다. 프래그먼트가 없는 URL(`.../kougo/gen`)도 같은 경로로 빈 soup이 되므로, 일반 탐색 경로가 이 소스로 들어오지 않게 `_build_chapter_url()`과 `discover_chapter_urls_for_book()` 양쪽에 분기를 둔다.
 - `_request_html()` 안의 예의 지연은 실제 요청이 있을 때만 실행되므로, 캐시 적중 장에서는 지연이 없다.
 - 재시도로 같은 책을 다시 처리해도 `page_url`이 같으면 재요청하지 않는다.
 
@@ -382,6 +385,17 @@ JPNBIBLE_OSIS_REF_PATTERN = re.compile(r"^[A-Za-z0-9]+\.(\d{1,3})\.(\d{1,3})$")
 JPNBIBLE_REMOVABLE_SELECTOR = "rt, rp, h1, h2, title"
 ```
 
+**다른 소스 페이지에서는 `[]`를 돌려줘야 한다**(체인 규약). 판별자는 `span.verse-content`다.
+
+```python
+if soup.select_one("span.verse-content") is None:
+    return []
+```
+
+`main.book`을 쓸 수 없다는 점에 주의한다 — [5.1](#51-scraperpy--책-페이지-캐시와-장-분리)이 넘겨주는 것은 이미 잘라 낸 `div[id]` 조각이라 `main`이 없다. `span.verse-content`는 eBible(`span.verse` + `id="V1"`)·bskorea·BibleGateway(`span.text`)·religious-life(`span.section`) 어디에도 없다.
+
+반대 방향도 확인했다. eBible 파서는 `div.main`을 찾는데 이 소스는 `<main class="book">`이므로 걸리지 않는다.
+
 절 조립 규칙:
 
 | 노드 | 처리 |
@@ -397,6 +411,8 @@ JPNBIBLE_REMOVABLE_SELECTOR = "rt, rp, h1, h2, title"
 - 절 본문이 여는 괄호로 끝나면 그 문자를 다음 절 앞으로 옮긴다([4.6](#46-괄호가-앞-절-끝에-달린다)).
 
 `CJK_JOIN_PATTERN`은 JPNMEB 작업에서 이미 들어가 있으므로 **재사용이고 신규 변경이 아니다.** 전권 프로토타입에서 CJK 사이 공백이 남은 절은 0건이다.
+
+병합 절을 B안으로 저장할 때 `_sanitize_verses()`가 걸림돌이 되지 않는지도 확인했다. 이 함수는 **절 번호로만 중복을 거른다**(`seen_numbers`). 본문이 같아도 번호가 다르면 그대로 통과하므로, 범위의 모든 번호에 같은 본문을 넣는 방식이 파이프라인 앞단에서 잘리지 않는다.
 
 ### 5.3 `scrape_bible_to_db.py` — 역본 등록
 
@@ -416,7 +432,7 @@ TRANSLATION_SOURCE_REQUIREMENTS = {
 ```
 
 - `get_source_name()`에 `jpnbible` 분기, `get_source_version()`에 경로 첫 세그먼트(`kougo`)를 돌려주는 분기를 추가한다. eBible과 같은 이유다 — 한 사이트가 여러 역본을 서비스하게 되면 `version`이 `None`인 행이 그 사이트의 모든 역본을 먹어 버린다.
-- `resolve_book_code_for_source()`는 이 소스에서 `None`을 돌려준다. 책 슬러그는 `bible_book.book_key`(USFM 계열)와 다르므로 **DB 값이 아니라 상수표**를 써야 한다. bskorea처럼 `book_key`를 우선하면 `gen`은 맞지만 `song`/`ezek`/`phlm`에서 404가 난다.
+- `resolve_book_code_for_source()`는 이 소스에서 `None`을 돌려준다. 책 슬러그는 `bible_book.book_key`(USFM 계열)와 다르므로 **DB 값이 아니라 상수표**(`USFM_BOOK_CODES` 옆에 두는 `JPNBIBLE_BOOK_SLUGS`, [4.1](#41-url-규칙--책-단위-한-페이지)의 66개)를 써야 한다. bskorea처럼 `book_key`를 소문자로 바꿔 쓰면 `gen`은 통하지만 나머지는 아니다 — 실측으로 `/kougo/sng`, `/kougo/ezk`, `/kougo/phm`이 전부 404이고 `/kougo/song`이 200이다.
 
 `translation_type`을 **`KOUGO`** 로 권고하는 이유:
 
@@ -571,6 +587,8 @@ ORDER BY 1, 2, 3 LIMIT 20;
 -- 기대: 0행
 ```
 
+이 질의의 민감도를 실측했다. 루비를 지우지 않고 파싱한 창세기·마가·시편 2,205절 중 **2,197절(99.6%)** 이 걸린다. 놓치는 8절은 루비가 붙은 한자가 없는 절이라, 오염되어도 원래 바꿀 것이 없는 절이다. 반대로 정상 파싱한 31,104절에 대한 **오탐은 0건**이다.
+
 CJK 공백 오염도 같이 본다(JPNMEB와 동일한 질의).
 
 ```sql
@@ -591,7 +609,12 @@ CJK 공백 오염도 같이 본다(JPNMEB와 동일한 질의).
 
 합계 차이는 **+2**(31,102 → 31,104)다. 뒤 세 장은 [jpn1965 설계](new-japanese-nt-scraping-design.md)에서 확인한 차이와 같은 장이다. 일본어 역본이 공유하는 절 구분이지 이 소스의 결함이 아니다.
 
-JPNMEB와 비교하면 6개 장이 다르다. 위 4개에 더해 롬 14(26 대 23)와 롬 16(25 대 27)이 걸리는데, 이는 JPNMEB가 송영(롬 16:25-27)을 14장 끝으로 옮기기 때문이다. 口語訳은 KJV와 같은 자리에 둔다.
+JPNMEB와 비교하면 6개 장이 다르다. 위 4개에 더해 롬 14(JPNMEB 26 대 23)와 롬 16(25 대 27)이 걸린다. DB를 직접 확인한 결과 원인은 이렇다.
+
+- JPNMEB는 송영을 **14:24-26**에 둔다(「私の福音、すなわちイエス・キリストについての宣教と…」). 口語訳은 KJV와 같이 16:25-27에 둔다.
+- JPNMEB 롬 16은 24절까지가 본문이고 **25절이 `(omitted)`** 다. 그래서 실제 본문은 24절인데 행 수는 25로 잡힌다.
+
+두 역본의 총계 차이 +1(31,104 대 31,103)은 이 여섯 장의 합(+1 −1 +1 +1 −3 +2)으로 정확히 설명된다.
 
 ### 7.5 병합·분할 절 검증
 
@@ -749,7 +772,7 @@ wordproject는 절 번호가 깨끗하지만 **2002년 訂正 본문**이라 권
 
 ### 리스크 1. 루비를 지우지 않고 적재 (가장 큼)
 
-31,104절 전부에 읽기가 섞인다. 절 수·연속성·빈 절 검사를 **모두 통과한다.** [7.3](#73-루비-누출-검증)의 질의가 유일한 방어이며, `get_text()`로 확인하면 문제가 없어 보이므로 테스트를 파서 결과로 작성해야 한다.
+루비가 붙은 한자가 있는 절 전부에 읽기가 섞인다 — 창세기·마가·시편 표본 2,205절 중 **2,197절(99.6%)** 이다. 그러면서 절 수·연속성·빈 절 검사를 **모두 통과한다.** [7.3](#73-루비-누출-검증)의 질의가 유일한 방어이며, `get_text()`로 확인하면 문제가 없어 보이므로 테스트를 파서 결과로 작성해야 한다.
 
 ### 리스크 2. 책 페이지 캐시가 조용히 무력화
 
