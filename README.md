@@ -46,6 +46,7 @@
 - `docs/santa-biblia-libre-para-el-mundo-scraping-design.md`: SBLM 설계 문서
 - `docs/japanese-public-domain-scraping-design.md`: JPNMEB(일본어) 설계 문서
 - `docs/new-japanese-nt-scraping-design.md`: JPNLOC(일본어 신약) 설계 문서 (미구현)
+- `docs/japanese-colloquial-1955-scraping-design.md`: KOUGO(일본어 口語訳 1954/1955) 설계 문서 (미구현)
 
 ## 요구 사항
 
