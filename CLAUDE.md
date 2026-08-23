@@ -16,6 +16,7 @@ Supported sources:
 | `biblegateway.com` (`version=ASV`) | ASV (American Standard Version) | Implemented |
 | `ebible.org` (`spaRV1909`) | RVR1909 (Reina Valera 1909, Spanish) | Implemented |
 | `ebible.org` (`spablm`) | SBLM (Santa Biblia libre para el mundo, Spanish) | Implemented |
+| `ebible.org` (`jpnm`) | JFB (フリーダム・バイブル, Japanese) | Implemented |
 
 Design documents:
 
@@ -24,7 +25,7 @@ Design documents:
 - [docs/american-standard-version-scraping-design.md](docs/american-standard-version-scraping-design.md) — ASV
 - [docs/reina-valera-1909-scraping-design.md](docs/reina-valera-1909-scraping-design.md) — RVR1909
 - [docs/santa-biblia-libre-para-el-mundo-scraping-design.md](docs/santa-biblia-libre-para-el-mundo-scraping-design.md) — SBLM
-- [docs/japanese-public-domain-scraping-design.md](docs/japanese-public-domain-scraping-design.md) — 일본어 퍼블릭 도메인 (설계만, 미구현)
+- [docs/japanese-public-domain-scraping-design.md](docs/japanese-public-domain-scraping-design.md) — JFB (Japanese)
 
 ## Common commands
 
@@ -88,6 +89,7 @@ bskorea → biblegateway → ebible → bibletable → chapter-prefixed → orde
 - Leaving eBible pages to the generic parsers is the worst case in this repo: the regex fallback returns a full, contiguous verse list with the number glued into verse 1, so verse-count and contiguity checks both pass.
 - `_request_html()` re-decodes with `apparent_encoding` when `Content-Type` omits a charset. eBible declares UTF-8 only in a `<meta>` tag, and without this every Spanish accent is mojibake. Sources that send a charset are untouched — do not "simplify" this into an unconditional override.
 - The four verses WEB leaves untranslated (Luke 17:36, Acts 8:37, 15:34, 24:7) are stored as `OMITTED_VERSE_TEXT` (`(omitted)`) rather than skipped, so contiguous verse numbering stays an invariant and any real gap reads as a scrape failure. The marker is written **only** when the span holds a `sup.footnote` and no body text — never for an arbitrarily empty span, or a DOM change would quietly fill the DB with placeholders instead of failing.
+- `CJK_JOIN_PATTERN` strips the block-join space when **both** sides are CJK: Japanese and Chinese write no spaces between words, so the separator Spanish and English require corrupts them instead (measured on jpnm as 49% of sampled verses). Hangul is deliberately outside `CJK_RANGES` — Korean does space its words, and widening the range there repeats the bskorea particle bug in reverse. The test suite guards both directions.
 - eBible's spablm omits **the same four verses** and needs the same treatment, which is why `EBIBLE_FOOTNOTE_SELECTOR` is separate from `EBIBLE_REMOVABLE_SELECTOR`: removal happens in two passes because stripping `a.notemark` first would destroy the only evidence that the empty verse was intentional. spaRV1909 carries all four as real text and must stay free of markers — check both translations after touching this.
 
 ### Adding a new source
@@ -113,7 +115,7 @@ Skipping step 7 lets, for example, WEB text land under the KJV translation — e
 - `.env` is loaded with `os.environ.setdefault()`, so **shell environment variables win**.
 - Translation resolution order: `BIBLE_TRANSLATION_ID` → lookup by (`BIBLE_TRANSLATION_TYPE`, `BIBLE_TRANSLATION_NAME`, `BIBLE_LANGUAGE_CODE`) → legacy default `translation_id=10`.
 - That **legacy fallback of 10 is a trap**: with no variables set, data is silently written to translation 10.
-- Entry URL comes from `KJV_ENTRY_URL` / `NKRV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` / `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL`. `BIBLE_LANGUAGE_CODE=en` no longer identifies a source on its own — with more than one English URL set, resolution raises rather than guessing. `BIBLE_TRANSLATION_ID` does **not** steer entry-URL selection, so an ID-only run can silently pick the wrong source; pass `BIBLE_TRANSLATION_TYPE` or `--entry-url`.
+- Entry URL comes from `KJV_ENTRY_URL` / `NKRV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` / `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` / `JFB_ENTRY_URL`. `BIBLE_LANGUAGE_CODE=en` no longer identifies a source on its own — with more than one English URL set, resolution raises rather than guessing. `BIBLE_TRANSLATION_ID` does **not** steer entry-URL selection, so an ID-only run can silently pick the wrong source; pass `BIBLE_TRANSLATION_TYPE` or `--entry-url`.
 - Never hardcode DB credentials (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`).
 
 ### CLI argument constraints

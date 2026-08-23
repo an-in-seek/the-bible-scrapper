@@ -44,7 +44,7 @@
 - `docs/american-standard-version-scraping-design.md`: ASV 설계 문서
 - `docs/reina-valera-1909-scraping-design.md`: RVR1909 설계 문서
 - `docs/santa-biblia-libre-para-el-mundo-scraping-design.md`: SBLM 설계 문서
-- `docs/japanese-public-domain-scraping-design.md`: 일본어 퍼블릭 도메인 설계 문서 (미구현)
+- `docs/japanese-public-domain-scraping-design.md`: JFB(일본어) 설계 문서
 
 ## 요구 사항
 
@@ -93,18 +93,20 @@ WEB_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=W
 ASV_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=ASV
 RVR1909_ENTRY_URL=https://ebible.org/spaRV1909/GEN01.htm
 SBLM_ENTRY_URL=https://ebible.org/spablm/GEN01.htm
+JFB_ENTRY_URL=https://ebible.org/jpnm/GEN01.htm
 ```
 
 `--entry-url`를 지정하지 않으면 기본 URL은 아래 순서로 결정됩니다.
 
-1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM`)에 해당하는 환경변수
+1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JFB`)에 해당하는 환경변수
 2. `BIBLE_TRANSLATION_ID=2` 또는 `BIBLE_TRANSLATION_NAME=개역개정`이면 `NKRV_ENTRY_URL`
 3. `BIBLE_LANGUAGE_CODE`로 좁혀지는 소스가 하나면 그 값
    - `ko` -> `NKRV_ENTRY_URL`
    - `en` -> `KJV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` 중 설정된 것
    - `es` -> `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` 중 설정된 것
+   - `ja` -> `JFB_ENTRY_URL`
 4. 설정된 엔트리 URL이 하나뿐이면 그 값
-5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` 순으로 선택
+5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JFB` 순으로 선택
 6. 아무것도 없으면 내장 기본값 `https://thekingsbible.com/Bible/1/1` 사용
 
 주의: `BIBLE_LANGUAGE_CODE`만으로는 소스가 특정되지 않습니다.  
@@ -320,6 +322,23 @@ RVR1909와 다른 점:
 - 각주 마커(`a.notemark`)는 각주 본문(`span.popup`)을 자식으로 품고 있어 함께 제거됩니다.
 
 **본문이 개정 중인 초안입니다.** 페이지 하단에 `Este es un borrador de traducción`이 표기되어 있고 원문이 수시로 갱신됩니다. 적재 이후의 수정은 재실행으로 반영되지 않으므로, [원문이 개정되는 경우](#원문이-개정되는-경우)의 절차를 따르세요. 퍼블릭 도메인입니다.
+
+### 7. JFB `ebible.org`
+
+フリーダム・バイブル(Japanese Freedom Bible). RVR1909·SBLM과 같은 사이트·같은 렌더러이며 역본 코드만 다릅니다.
+
+```env
+JFB_ENTRY_URL=https://ebible.org/jpnm/GEN01.htm
+```
+
+일본어 고유의 처리:
+
+- **블록 경계 공백을 넣지 않습니다.** 일본어는 단어 사이를 띄우지 않으므로, 스페인어·영어에 필요한 결합 공백이 여기서는 본문을 오염시킵니다(표본 절의 49%). 양쪽이 모두 CJK 문자일 때만 공백을 제거합니다.
+- **한글은 이 규칙에서 제외됩니다.** 한국어는 단어를 띄어 쓰므로, 범위에 포함하면 NKRV 본문이 망가집니다.
+- 원문이 비워 둔 다섯 절(눅 17:36, 행 8:37 · 15:34 · 24:7, **롬 16:25**)은 `(omitted)`로 기록합니다. 앞의 넷은 WEB과 같고 롬 16:25는 이 역본에만 있습니다.
+- 책명은 `ul.tnav`에서 가져옵니다. `div.mt`는 서수가 빠져 `書` 하나에 5권, `福音書` 하나에 4권이 뭉칩니다.
+
+SBLM과 마찬가지로 **개정 중 초안**(`これは翻訳の草案です`)이므로 [원문이 개정되는 경우](#원문이-개정되는-경우)의 절차가 적용됩니다. 퍼블릭 도메인입니다.
 
 ## 네트워크와 재시도
 
