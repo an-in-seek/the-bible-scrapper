@@ -17,6 +17,7 @@ Supported sources:
 | `ebible.org` (`spaRV1909`) | RVR1909 (Reina Valera 1909, Spanish) | Implemented |
 | `ebible.org` (`spablm`) | SBLM (Santa Biblia libre para el mundo, Spanish) | Implemented |
 | `ebible.org` (`jpnm`) | JPNMEB (フリーダム・バイブル, Japanese) | Implemented |
+| `jpn.bible` (`kougo`) | KOUGO (口語訳聖書 1954/1955, Japanese) | Implemented |
 
 Design documents:
 
@@ -27,7 +28,7 @@ Design documents:
 - [docs/santa-biblia-libre-para-el-mundo-scraping-design.md](docs/santa-biblia-libre-para-el-mundo-scraping-design.md) — SBLM
 - [docs/japanese-public-domain-scraping-design.md](docs/japanese-public-domain-scraping-design.md) — JPNMEB (Japanese)
 - [docs/new-japanese-nt-scraping-design.md](docs/new-japanese-nt-scraping-design.md) — JPNLOC (Japanese NT, 설계만·미구현)
-- [docs/japanese-colloquial-1955-scraping-design.md](docs/japanese-colloquial-1955-scraping-design.md) — KOUGO (口語訳 1954/1955, 설계만·미구현)
+- [docs/japanese-colloquial-1955-scraping-design.md](docs/japanese-colloquial-1955-scraping-design.md) — KOUGO (口語訳 1954/1955)
 
 ## Common commands
 
@@ -77,7 +78,7 @@ Data flow: read `bible_book` → build per-source chapter URLs → fetch HTML �
 `HolyBibleScraper._extract_verses()` is an ordered chain:
 
 ```
-bskorea → biblegateway → ebible → bibletable → chapter-prefixed → ordered list → structured nodes → regex fallback
+bskorea → biblegateway → ebible → jpnbible → bibletable → chapter-prefixed → ordered list → structured nodes → regex fallback
 ```
 
 - **Source-specific parsers go first, generic inference parsers last.** If `_extract_verses_from_structured_nodes()` runs first, it misreads menus, footnotes, and dropdown text as verses.
@@ -90,6 +91,10 @@ bskorea → biblegateway → ebible → bibletable → chapter-prefixed → orde
 - A `div.d` before the first verse marker is a **psalm superscription**, and it is deliberately not stored — matching KJV, NKRV, WEB, and ASV. RVR1909 is the lone exception only because that source inlines the superscription into verse 1 where the parser cannot separate it. Do not "fix" the difference by prepending it.
 - Leaving eBible pages to the generic parsers is the worst case in this repo: the regex fallback returns a full, contiguous verse list with the number glued into verse 1, so verse-count and contiguity checks both pass.
 - `_request_html()` re-decodes with `apparent_encoding` when `Content-Type` omits a charset. eBible declares UTF-8 only in a `<meta>` tag, and without this every Spanish accent is mojibake. Sources that send a charset are untouched — do not "simplify" this into an unconditional override.
+- `_extract_verses_from_jpnbible_page()` receives a **chapter slice, not a page**: jpn.bible serves one page per book and has no per-chapter URL, so `_fetch_soup()` fetches the book once, splits it on `main.book > div[id]`, and hands over one `div`. Its guard is therefore `span.verse-content`, not `main.book`. Keying that split by `int` instead of the fragment string makes every lookup miss and every chapter come back empty.
+- **`rt`/`rp` must be removed before the walk.** bs4 keeps furigana out of `get_text()`, but `RubyTextString`/`RubyParenthesisString` subclass `NavigableString`, so the descendants walk every accumulating parser here uses would fold `神（かみ）` into the verse. A `get_text()`-based test would pass while the DB fills with readings; measured at 2,197 of 2,205 sampled verses.
+- On jpn.bible the verse `id` carries the whole range: `id="132:3 Ps.132.4 Ps.132.5"` means 3–5, and reading only the first extra token loses Psalms 132:5. `id="22:3!a"` is half of a split verse, and Exodus 22 prints `3!b` **before** `3!a`, so the halves join by suffix, not document order. A merged range is stored at every number it covers, which keeps verse numbering contiguous.
+- jpn.bible leaves the opening bracket of a disputed passage at the end of the **previous** verse (19 verses, e.g. Matthew 17:20 ends with `〔`). The parser moves it to the head of the next verse; that is the only character-level edit made to this source, and it is what the second witness (`bible.religious-life.com`) does too.
 - The four verses WEB leaves untranslated (Luke 17:36, Acts 8:37, 15:34, 24:7) are stored as `OMITTED_VERSE_TEXT` (`(omitted)`) rather than skipped, so contiguous verse numbering stays an invariant and any real gap reads as a scrape failure. The marker is written **only** when the span holds a `sup.footnote` and no body text — never for an arbitrarily empty span, or a DOM change would quietly fill the DB with placeholders instead of failing.
 - `CJK_JOIN_PATTERN` strips the block-join space when **both** sides are CJK: Japanese and Chinese write no spaces between words, so the separator Spanish and English require corrupts them instead (measured on jpnm as 49% of sampled verses). Hangul is deliberately outside `CJK_RANGES` — Korean does space its words, and widening the range there repeats the bskorea particle bug in reverse. The test suite guards both directions.
 - eBible's spablm omits **the same four verses** and needs the same treatment, which is why `EBIBLE_FOOTNOTE_SELECTOR` is separate from `EBIBLE_REMOVABLE_SELECTOR`: removal happens in two passes because stripping `a.notemark` first would destroy the only evidence that the empty verse was intentional. spaRV1909 carries all four as real text and must stay free of markers — check both translations after touching this.
@@ -117,7 +122,7 @@ Skipping step 7 lets, for example, WEB text land under the KJV translation — e
 - `.env` is loaded with `os.environ.setdefault()`, so **shell environment variables win**.
 - Translation resolution order: `BIBLE_TRANSLATION_ID` → lookup by (`BIBLE_TRANSLATION_TYPE`, `BIBLE_TRANSLATION_NAME`, `BIBLE_LANGUAGE_CODE`) → legacy default `translation_id=10`.
 - That **legacy fallback of 10 is a trap**: with no variables set, data is silently written to translation 10.
-- Entry URL comes from `KJV_ENTRY_URL` / `NKRV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` / `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` / `JPNMEB_ENTRY_URL`. `BIBLE_LANGUAGE_CODE=en` no longer identifies a source on its own — with more than one English URL set, resolution raises rather than guessing. `BIBLE_TRANSLATION_ID` does **not** steer entry-URL selection, so an ID-only run can silently pick the wrong source; pass `BIBLE_TRANSLATION_TYPE` or `--entry-url`.
+- Entry URL comes from `KJV_ENTRY_URL` / `NKRV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` / `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` / `JPNMEB_ENTRY_URL` / `KOUGO_ENTRY_URL`. A language code no longer identifies a source on its own: `en` covers KJV/WEB/ASV, `es` covers RVR1909/SBLM and `ja` covers JPNMEB/KOUGO, so with more than one URL of that language set, resolution raises rather than guessing. `BIBLE_TRANSLATION_ID` does **not** steer entry-URL selection, so an ID-only run can silently pick the wrong source; pass `BIBLE_TRANSLATION_TYPE` or `--entry-url`.
 - Never hardcode DB credentials (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`).
 
 ### CLI argument constraints

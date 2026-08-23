@@ -2,13 +2,16 @@
 
 성경 본문을 스크래핑해 PostgreSQL의 `bible_chapter`, `bible_verse`에 적재하는 도구입니다.
 
-현재 기준으로 안정적으로 맞춰진 소스는 아래 5개입니다.
+현재 기준으로 안정적으로 맞춰진 소스는 아래 8개입니다.
 
 - `thekingsbible.com` KJV
 - `bskorea.or.kr` NKRV(`version=GAE`)
 - `biblegateway.com` WEB(`version=WEB`, World English Bible)
 - `biblegateway.com` ASV(`version=ASV`, American Standard Version)
 - `ebible.org` RVR1909(`spaRV1909`, Reina Valera 1909 — 스페인어)
+- `ebible.org` SBLM(`spablm`, Santa Biblia libre para el mundo — 스페인어)
+- `ebible.org` JPNMEB(`jpnm`, フリーダム・バイブル — 일본어)
+- `jpn.bible` KOUGO(`kougo`, 口語訳聖書 1954/1955 — 일본어)
 
 설계 문서:
 
@@ -16,6 +19,9 @@
 - WEB: [docs/world-english-bible-scraping-design.md](docs/world-english-bible-scraping-design.md)
 - ASV: [docs/american-standard-version-scraping-design.md](docs/american-standard-version-scraping-design.md)
 - RVR1909: [docs/reina-valera-1909-scraping-design.md](docs/reina-valera-1909-scraping-design.md)
+- SBLM: [docs/santa-biblia-libre-para-el-mundo-scraping-design.md](docs/santa-biblia-libre-para-el-mundo-scraping-design.md)
+- JPNMEB: [docs/japanese-public-domain-scraping-design.md](docs/japanese-public-domain-scraping-design.md)
+- KOUGO: [docs/japanese-colloquial-1955-scraping-design.md](docs/japanese-colloquial-1955-scraping-design.md)
 
 ## 주요 특징
 
@@ -46,7 +52,7 @@
 - `docs/santa-biblia-libre-para-el-mundo-scraping-design.md`: SBLM 설계 문서
 - `docs/japanese-public-domain-scraping-design.md`: JPNMEB(일본어) 설계 문서
 - `docs/new-japanese-nt-scraping-design.md`: JPNLOC(일본어 신약) 설계 문서 (미구현)
-- `docs/japanese-colloquial-1955-scraping-design.md`: KOUGO(일본어 口語訳 1954/1955) 설계 문서 (미구현)
+- `docs/japanese-colloquial-1955-scraping-design.md`: KOUGO(일본어 口語訳 1954/1955) 설계 문서
 
 ## 요구 사항
 
@@ -96,23 +102,24 @@ ASV_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=A
 RVR1909_ENTRY_URL=https://ebible.org/spaRV1909/GEN01.htm
 SBLM_ENTRY_URL=https://ebible.org/spablm/GEN01.htm
 JPNMEB_ENTRY_URL=https://ebible.org/jpnm/GEN01.htm
+KOUGO_ENTRY_URL=https://jpn.bible/kougo/gen#1
 ```
 
 `--entry-url`를 지정하지 않으면 기본 URL은 아래 순서로 결정됩니다.
 
-1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JPNMEB`)에 해당하는 환경변수
+1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JPNMEB` / `KOUGO`)에 해당하는 환경변수
 2. `BIBLE_TRANSLATION_ID=2` 또는 `BIBLE_TRANSLATION_NAME=개역개정`이면 `NKRV_ENTRY_URL`
 3. `BIBLE_LANGUAGE_CODE`로 좁혀지는 소스가 하나면 그 값
    - `ko` -> `NKRV_ENTRY_URL`
    - `en` -> `KJV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` 중 설정된 것
    - `es` -> `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` 중 설정된 것
-   - `ja` -> `JPNMEB_ENTRY_URL`
+   - `ja` -> `JPNMEB_ENTRY_URL` / `KOUGO_ENTRY_URL` 중 설정된 것
 4. 설정된 엔트리 URL이 하나뿐이면 그 값
-5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JPNMEB` 순으로 선택
+5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JPNMEB` -> `KOUGO` 순으로 선택
 6. 아무것도 없으면 내장 기본값 `https://thekingsbible.com/Bible/1/1` 사용
 
 주의: `BIBLE_LANGUAGE_CODE`만으로는 소스가 특정되지 않습니다.  
-`en`(KJV / WEB / ASV)과 `es`(RVR1909 / SBLM) 모두 소스가 둘 이상이라,  
+`en`(KJV / WEB / ASV), `es`(RVR1909 / SBLM), `ja`(JPNMEB / KOUGO) 모두 소스가 둘 이상이라,  
 해당 엔트리 URL이 여러 개 설정된 상태에서 언어 코드만 주면 실행이 중단됩니다.  
 이때는 `BIBLE_TRANSLATION_TYPE`을 지정하거나 `--entry-url`을 명시해야 합니다.
 
@@ -341,6 +348,33 @@ JPNMEB_ENTRY_URL=https://ebible.org/jpnm/GEN01.htm
 - 책명은 `ul.tnav`에서 가져옵니다. `div.mt`는 서수가 빠져 `書` 하나에 5권, `福音書` 하나에 4권이 뭉칩니다.
 
 SBLM과 마찬가지로 **개정 중 초안**(`これは翻訳の草案です`)이므로 [원문이 개정되는 경우](#원문이-개정되는-경우)의 절차가 적용됩니다. 퍼블릭 도메인입니다.
+
+### 8. KOUGO `jpn.bible`
+
+口語訳聖書(신약 1954 / 구약 1955). 일본성서협회 발행분이며 일본 기준 보호기간이 만료된 판본입니다.
+자세한 근거와 관할별 차이는 [설계 문서](docs/japanese-colloquial-1955-scraping-design.md) 1장에 있습니다.
+
+```env
+KOUGO_ENTRY_URL=https://jpn.bible/kougo/gen#1
+```
+
+이 소스만의 처리:
+
+- **페이지가 책 단위입니다.** 장 단위 URL이 없어 장 번호를 프래그먼트(`#3`)로 넘기고, 책 페이지를
+  한 번 받아 장별로 쪼개 씁니다. 전권 적재의 HTTP 요청이 **66회**뿐입니다.
+- **루비(후리가나)를 제거합니다.** 지우지 않으면 본문이 `はじめに神（かみ）は…`가 됩니다.
+  `get_text()`로 보면 멀쩡해 보이는 종류의 오염이라 파서 결과로 확인해야 합니다.
+- **병합 절 16건**은 범위의 모든 번호에 같은 본문을 저장합니다(시 132:3-5 등).
+- **분할 절 1건**(출 22:3)은 문서 순서가 아니라 `a` → `b` 순서로 합칩니다.
+- 문제 구절의 여는 괄호가 앞 절 끝에 남아 있어(19절) 다음 절 앞으로 옮깁니다.
+- 시편 표제(`<title type="psalm">`) 138개는 저장하지 않습니다. 다른 역본과 같은 처리입니다.
+
+적재 결과는 66권 / 1,189장 / **31,104절**이며 KJV와는 4개 장(시 47, 고후 13, 요삼 1, 계 12)에서만
+절 수가 다릅니다. 원문이 비워 둔 절이 없어 `(omitted)`는 0건입니다.
+
+**본문에 일본성서협회가 이후 訂正한 표현이 그대로 들어 있습니다**(「おしの霊」「らい病人」 등).
+만료된 것은 1954/1955 원본이고 訂正된 낱말에는 저작권이 남아 있어, 訂正 후 본문을 쓰려면
+협회의 허락 절차가 필요합니다.
 
 ## 네트워크와 재시도
 
