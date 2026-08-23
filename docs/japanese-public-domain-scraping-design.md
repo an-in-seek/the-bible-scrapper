@@ -451,7 +451,9 @@ SELECT COUNT(*) FROM public.bible_verse v
 JOIN public.bible_chapter c ON c.id = v.chapter_id
 JOIN public.bible_book b    ON b.id = c.book_id
 WHERE b.translation_id = :tid
-  AND v.text !~ '[぀-ヿ一-鿿]';
+  AND v.text !~ '[぀-ヿ一-鿿]'
+  -- (omitted) 표기는 의도적으로 ASCII 다. 제외하지 않으면 정상 상태에서 5행이 걸린다.
+  AND v.text <> '(omitted)';
 ```
 
 ```sql
@@ -646,6 +648,35 @@ python3 scripts/check_translation_drift.py --translation-id <tid> --entry-url ht
 
 ---
 
+## 12.5 적재 결과 (실측)
+
+2026-08-23 적재 완료. `translation_id=36`. 책 재시도 0회, 경고 0건으로 1회에 끝났다.
+
+| 항목 | 기대 | 결과 |
+| --- | --- | --- |
+| 책 | 66 | **66** |
+| 장 | 1,189 | **1,189** |
+| 절 | **31,103** | **31,103** |
+| 절 번호 불연속 장 | 0 | 0 |
+| 빈 본문 절 | 0 | 0 |
+| mojibake 잔재 | 0 | 0 |
+| 일본어 문자 없는 절 | 0 (`(omitted)` 제외) | 0 |
+| **CJK 사이 공백 오염** | **0** | **0** |
+| `(omitted)` 표기 | 5 | **5** |
+| WEB 대비 차이 | 롬 16:25 한 건 | **한 건** |
+
+**[7.5](#75-기존-역본-대조--web을-기준으로-삼는다)의 예측이 그대로 맞았다.** 절 수 31,103, WEB에만 있는 절 0건, JFB에만 있는 절은 롬 16:25 하나다. 생략 절 5건의 위치도 [4.4](#44-생략-절은-다섯-개다)에서 예고한 그대로였다.
+
+```
+(omitted) 표기 위치: ACT 8:37 · ACT 15:34 · ACT 24:7 · LUK 17:36 · ROM 16:25
+```
+
+### 구현하며 드러난 것
+
+- **`_normalize_text()`가 U+3000을 먼저 접는다.** [5.1](#51-scraperpy--cjk-공백-제거-유일한-파서-변경)의 전각 공백 보존 서술을 정정했다. 실익이 없어(본문에 U+3000이 0개) 범위를 넓히지 않았다.
+- **인코딩 검증 쿼리에 `(omitted)` 제외가 필요하다.** 표기가 의도적으로 ASCII라 제외하지 않으면 정상 상태에서 5행이 걸린다. 처음 돌렸을 때 실제로 걸렸다.
+- `bible_book_description`의 `ja` 66행은 기존 영어 행을 번역해 넣었다. 삽입 전 검사에서 한글 혼입 1건과 영단어 잔존 1건이 잡혀 수정했다.
+
 ## 13. 결론
 
 일본어 적재는 **소스 추가가 아니라 역본 추가**다. eBible 어댑터가 이미 있어 URL·HTTP·인코딩·재시도·resume·생략 절 처리까지 그대로 재사용된다.
@@ -658,4 +689,6 @@ python3 scripts/check_translation_drift.py --translation-id <tid> --entry-url ht
 2. **역본 등록** — 5곳. `version` 토큰이 `jpnm`이라야 eBible 세 번째 역본이 구분된다. 생략 절 처리는 코드 변경이 없지만 **기대 건수가 4가 아니라 5**다(롬 16:25).
 3. **DB 시드** — CHECK 제약 1개, `bible_translation` 1행, `bible_book` 66행(`ul.tnav` 출처), **`bible_book_description` `ja` 66행 신규**. 일본어 역본이 DB에 없어 SBLM보다 작업이 많다.
 
-착수 전 확인이 필요한 사항은 하나다 — **판본 선택**([1.3](#13-후보-비교와-선택)). 나머지는 결론이 나 있다.
+판본은 [1.3](#13-후보-비교와-선택)의 판단대로 `jpnm`으로 진행해 **66권 적재를 완료했다**([12.5](#125-적재-결과-실측)). 예측한 절 수와 WEB 대비 차이가 그대로 맞았다.
+
+남은 운영 사항은 **초안 갱신**([9.3](#93-초안-갱신-문제)) 하나다. 적재 시점 `Last-Modified`는 `Thu, 20 Aug 2026 01:35:18 GMT`이며, 이후 원문이 바뀌면 `scripts/check_translation_drift.py`로 확인한 뒤 재적재 절차를 따른다.
