@@ -135,7 +135,8 @@ https://www.stepbible.org/rest/bible/getBibleText/JapKougo/Gen.1/V
 5. **가장 큰 파서 함정은 루비(후리가나)다.** 지우지 않으면 절 본문이 「はじめに神（かみ）は天（てん）と…」가 된다. 확인이 까다로운 이유는 `get_text()`로 보면 멀쩡하기 때문이다 — bs4는 루비 문자열을 별도 타입으로 분류해 `get_text()`에서 빼지만, 그 타입이 `NavigableString`의 하위 클래스라 **이 저장소 파서들이 쓰는 `descendants` 순회는 그대로 통과시킨다**([4.3](#43-함정-1-루비를-지우지-않으면-읽기가-본문에-섞인다)).
 6. **병합 절 16건, 분할 절 1건이 있다.** 소스가 기계 판독 가능한 형태로 표기한다(`id="16:25 Rom.16.26"`, `id="22:3!a"`). 저장 방식은 [jpn1965 설계 §4.4](new-japanese-nt-scraping-design.md)와 같은 결정이며 **B안(범위 전체에 같은 본문)** 을 권고한다.
 7. **적재 예상치는 66권 / 1,189장 / 31,104절이다.** 프로토타입으로 66권 전체를 파싱해 얻은 값이며, 연속성이 깨진 장 0개, 빈 절 0개다. KJV(31,102)와는 **4개 장에서만** 다르다([7.4](#74-kjv-대조--네-개-장)).
-8. **DB 작업은 SBLM/JPNMEB와 같은 양이다.** CHECK 제약 1개 값, `bible_translation` 1행, `bible_book` 66행. `bible_book_description`의 `ja` 66행은 이미 있으므로 추가 작업이 없다.
+8. **기존 동작이 하나 바뀐다.** `ja` 역본이 둘이 되므로 `BIBLE_LANGUAGE_CODE=ja`만으로는 엔트리 URL이 정해지지 않고 **예외가 난다.** `en`에서 이미 겪은 것과 같은 모호성이며, 실행해서 확인했다([5.4](#54-기존-동작이-바뀐다--일본어-역본이-둘이-된다)).
+9. **DB 작업은 SBLM/JPNMEB와 같은 양이다.** CHECK 제약 1개 값, `bible_translation` 1행, `bible_book` 66행. `bible_book_description`의 `ja` 66행은 이미 있으므로 추가 작업이 없다.
 
 ---
 
@@ -464,6 +465,26 @@ TRANSLATION_SOURCE_REQUIREMENTS = {
 - CrossWire 모듈명 `JapKougo`에서 딴 `JAPKOUGO`도 가능하지만, **적재 소스가 CrossWire가 아니다.** 쓰지 않는 배포처의 ID를 붙이면 나중에 소스를 되짚을 때 오해를 만든다.
 - `KOUGO`는 이 판본을 가리키는 보편적 호칭(口語訳)이고, 기존 30개 값 및 널리 쓰이는 영어 약칭과 충돌하지 않는다.
 
+### 5.4 기존 동작이 바뀐다 — 일본어 역본이 둘이 된다
+
+**이 등록은 기존 JPNMEB 실행을 깨뜨릴 수 있다.** 지금까지 `ja`는 역본이 하나뿐이라 `BIBLE_LANGUAGE_CODE=ja`만으로 엔트리 URL이 정해졌다. `KOUGO`가 들어가면 `en`(KJV/WEB/ASV)에서 이미 겪은 모호성이 `ja`에도 생긴다. 실제로 실행해 확인했다.
+
+```
+JPNMEB_ENTRY_URL 만 설정 + BIBLE_LANGUAGE_CODE=ja
+  현재      → https://ebible.org/jpnm/GEN01.htm
+  등록 후   → ValueError: Ambiguous entry URL: BIBLE_LANGUAGE_CODE='ja'
+              matches JPNMEB_ENTRY_URL, KOUGO_ENTRY_URL.
+```
+
+`KOUGO_ENTRY_URL`을 함께 설정한 환경에서만 발생한다. 회피책 두 가지를 모두 확인했다.
+
+| 조치 | 결과 |
+| --- | --- |
+| `BIBLE_TRANSLATION_TYPE=JPNMEB` 추가 | JPNMEB URL로 정상 해석 |
+| `KOUGO_ENTRY_URL`을 그 실행에서 빼기 | JPNMEB URL로 정상 해석 |
+
+조용히 잘못된 소스를 고르는 대신 **예외를 던지는 쪽이 설계 의도대로**이므로 코드를 바꿀 일은 아니다. 다만 이것은 **문서화해야 할 파급**이고, `.env`에 두 URL을 함께 두는 순간 기존 명령이 실패한다. README의 실행 예에 `BIBLE_TRANSLATION_TYPE`을 명시하는 작업이 함께 가야 한다.
+
 ---
 
 ## 6. DB 준비
@@ -737,6 +758,8 @@ religious-life 쪽 구조 결함은 전권 검사에서 따로 확인된다. **�
 | `test_jpnbible_book_page_cache` | 같은 책의 두 장을 요청해도 `_request_html` 호출이 **1회** |
 | `test_jpnbible_missing_chapter_returns_empty` | 캐시에 없는 장 → 절 0개(예외 아님) |
 | `test_other_sources_unaffected` | eBible/BibleGateway 픽스처가 새 파서에 걸리지 않음 |
+| `test_ja_entry_url_ambiguity` | `ja` URL 둘을 설정하고 `BIBLE_LANGUAGE_CODE=ja`만 주면 **예외**([5.4](#54-기존-동작이-바뀐다--일본어-역본이-둘이-된다)) |
+| `test_jpnmeb_still_resolves` | `BIBLE_TRANSLATION_TYPE=JPNMEB`이면 기존대로 eBible URL |
 
 캐시 테스트가 특히 중요하다. 이것이 깨지면 조용히 요청이 1,189회로 늘어나고, 결과는 정상이라 아무 검사도 잡지 못한다.
 
@@ -770,6 +793,37 @@ KOUGO_ENTRY_URL=https://jpn.bible/kougo/gen#1 \
 - 이 사이트는 **`Last-Modified`를 보내지 않는다.** `scripts/check_translation_drift.py --head-only`가 아무것도 보고하지 못한다. 대신 `ETag`와 `sitemap.xml`의 `lastmod`(현재 전 페이지 `2026-02-22T03:10:25+09:00`)를 쓴다.
 - 본문은 1955년에 고정된 판본이므로 SBLM 같은 "초안 갱신" 위험이 없다. 다만 **사이트가 오탈자를 고칠 수는 있다**([7.6](#76-제2-증인-대조)). 그때는 미적재 삽입 특성상 자동 반영되지 않으므로, 해당 절만 지우고 다시 넣는다. `bible_chapter`/`bible_verse`에 외래키가 없으므로 **절 → 장 순서**를 지킨다.
 - salterrae가 사라진 사례가 보여 주듯 **소스 사이트는 없어질 수 있다.** 적재를 마치면 DB가 원본이 되고, 그 시점의 크롤 결과를 따로 보관해 둘지는 운영 판단이다.
+
+### 9.4 잘못 적재했을 때 되돌리기
+
+미적재 삽입이라 **재실행으로는 고쳐지지 않는다.** 파서를 고쳐 다시 넣으려면 먼저 지워야 한다. `bible_chapter`/`bible_verse`에 외래키가 없으므로 **절을 먼저, 장을 나중에** 지운다. 순서를 뒤집으면 절이 고아가 되어 책 기준 질의로는 다시 찾을 수 없다.
+
+```sql
+-- 1) 절 먼저
+DELETE FROM public.bible_verse v
+USING public.bible_chapter c, public.bible_book b
+WHERE v.chapter_id = c.id AND c.book_id = b.id
+  AND b.translation_id = (SELECT id FROM public.bible_translation WHERE translation_type = 'KOUGO');
+
+-- 2) 그다음 장
+DELETE FROM public.bible_chapter c
+USING public.bible_book b
+WHERE c.book_id = b.id
+  AND b.translation_id = (SELECT id FROM public.bible_translation WHERE translation_type = 'KOUGO');
+
+-- 3) 확인 — 0 / 0 이어야 한다
+SELECT (SELECT COUNT(*) FROM public.bible_verse v
+          JOIN public.bible_chapter c ON c.id = v.chapter_id
+          JOIN public.bible_book b ON b.id = c.book_id
+         WHERE b.translation_id = :tid) AS verses,
+       (SELECT COUNT(*) FROM public.bible_chapter c
+          JOIN public.bible_book b ON b.id = c.book_id
+         WHERE b.translation_id = :tid) AS chapters;
+```
+
+`bible_book` 66행과 `bible_translation` 1행은 **지우지 않는다.** 도구가 읽기만 하는 표이고, 지우면 다시 시드해야 한다. 일부 장만 다시 넣을 때도 같은 순서를 지킨다.
+
+재적재 자체는 안전하다. 삽입이 미적재분만 대상으로 하므로 **중간에 끊긴 실행을 다시 돌리면 남은 것만 채운다.** 병합 절을 B안으로 넣어도 번호마다 한 행이므로 재실행이 행을 늘리지 않는다.
 
 ---
 
@@ -809,6 +863,29 @@ wordproject는 절 번호가 깨끗하지만 **2002년 訂正 본문**이라 권
 6. **DB 시드** — CHECK 제약 1개 값 → `bible_translation` 1행 → `bible_book` 66행. 순서를 지킨다.
 7. 한 권 적재(창세기)로 절 수·본문을 확인한 뒤 전권.
 8. [7](#7-검증) 전체 실행. 특히 [7.3](#73-루비-누출-검증)과 [7.6](#76-제2-증인-대조).
+
+저장소가 요구하는 신규 소스 체크리스트(CLAUDE.md "Adding a new source")와의 대응은 이렇다. 이 소스는 **항목이 세 개 늘어난다.**
+
+| CLAUDE.md 단계 | 이 설계에서 | 비고 |
+| --- | --- | --- |
+| 1 `_is_<source>_source()` | [5.1](#51-scraperpy--책-페이지-캐시와-장-분리) | 호스트 판별 |
+| 2 `_build_<source>_url()` | [4.1](#41-url-규칙--책-단위-한-페이지) | `#{chapter}` 프래그먼트를 붙인다 |
+| 3 `_discover_chapter_urls_for_<source>()` | [4.1](#41-url-규칙--책-단위-한-페이지) | `KJV_CHAPTER_COUNTS` 재사용, 프로브 없음 |
+| 4 `_extract_verses_from_<source>()` + 체인 | [5.2](#52-scraperpy--파서) | eBible 뒤, `bibletable` 앞 |
+| 5 `get_source_name()` 등 분기 | [5.2](#52-scraperpy--파서)·[5.3](#53-scrape_bible_to_dbpy--역본-등록) | `get_source_version()` 분기 포함 |
+| 6 엔트리 URL 해석 | [5.3](#53-scrape_bible_to_dbpy--역본-등록) | **[5.4](#54-기존-동작이-바뀐다--일본어-역본이-둘이-된다)의 파급을 함께 볼 것** |
+| 7 `TRANSLATION_SOURCE_REQUIREMENTS` | [5.3](#53-scrape_bible_to_dbpy--역본-등록) | 잘못 적재를 막는 마지막 방어선 |
+| 8 `resolve_book_code_for_source()` | [5.3](#53-scrape_bible_to_dbpy--역본-등록) | `None` 반환 + 전용 슬러그 상수 |
+| **추가 A** `_fetch_soup()` 분기와 책 페이지 캐시 | [5.1](#51-scraperpy--책-페이지-캐시와-장-분리) | 체크리스트에 없는 신규 구조 |
+| **추가 B** `JPNBIBLE_BOOK_SLUGS` 상수 | [4.1](#41-url-규칙--책-단위-한-페이지) | `book_key`로 대체 불가 |
+| **추가 C** 문서 갱신 | 아래 | 계약 문서가 바뀐다 |
+
+**추가 C가 빠지기 쉽다.** 이 소스는 CLAUDE.md에 적힌 전제 두 가지를 깬다.
+
+- "per-source chapter URL을 만들어 HTML을 가져온다"는 데이터 흐름 설명 — 이 소스는 **책 단위**다.
+- 파서 계약 절에 **루비 규칙**([4.3](#43-함정-1-루비를-지우지-않으면-읽기가-본문에-섞인다))이 없다. `CJK_JOIN_PATTERN` 항목 옆에 같은 무게로 들어가야 다음 사람이 지우지 않는다.
+
+README의 지원 소스 표·엔트리 URL 목록·실행 예([5.4](#54-기존-동작이-바뀐다--일본어-역본이-둘이-된다))도 함께 고친다.
 
 **6번은 3번보다 뒤여야 한다.** 역본을 먼저 등록하면 `_expected_translation_type()`이 첫 일치를 돌려주는 탓에 기존 실행이 흔들릴 수 있다(SBLM에서 확인된 순서 의존이다).
 
