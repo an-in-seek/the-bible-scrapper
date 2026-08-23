@@ -93,6 +93,7 @@ OMITTED_VERSE_TEXT = "(omitted)"
 BIBLEGATEWAY_OMITTED_VERSE_TEXT = OMITTED_VERSE_TEXT
 DEFAULT_EBIBLE_RV1909_ENTRY_URL = "https://ebible.org/spaRV1909/GEN01.htm"
 DEFAULT_EBIBLE_SBLM_ENTRY_URL = "https://ebible.org/spablm/GEN01.htm"
+DEFAULT_EBIBLE_JFB_ENTRY_URL = "https://ebible.org/jpnm/GEN01.htm"
 DEFAULT_EBIBLE_TRANSLATION_CODE = "spaRV1909"
 # Verse markers are `<span class="verse" id="V12">`; the chapter label uses V0.
 EBIBLE_VERSE_ID_PATTERN = re.compile(r"^V(\d{1,3})$")
@@ -117,6 +118,15 @@ EBIBLE_BLOCK_TAGS = frozenset({"div", "p", "li", "table", "tr", "blockquote"})
 # nonprofit static host rather than a site requirement. A full 66-book load stays well
 # under an hour at this rate.
 EBIBLE_MIN_DELAY_SECONDS = 1.0
+# Japanese and Chinese put no spaces between words, so the separator that joins a verse
+# split across blocks - required for Spanish and English - corrupts CJK text instead.
+# Hangul (U+AC00-D7A3) is deliberately excluded: Korean does space its words, and
+# collapsing there would repeat the bskorea particle-splitting bug in reverse.
+CJK_RANGES = "　-〿぀-ヿ㐀-䶿一-鿿＀-￯"
+# ASCII whitespace only. U+3000 sits inside CJK_RANGES and is content rather than a
+# separator; _normalize_text() has already folded it to a plain space by this point, so
+# widening this to \s would only make the loss harder to trace.
+CJK_JOIN_PATTERN = re.compile(rf"(?<=[{CJK_RANGES}])[ \t\r\n]+(?=[{CJK_RANGES}])")
 
 
 class RetryableHttpError(RuntimeError):
@@ -1073,6 +1083,8 @@ class HolyBibleScraper:
         verses: list[Verse] = []
         for verse_number in sorted(set(chunks) | omitted):
             text = self._normalize_text("".join(chunks.get(verse_number, [])).replace(" ", " "))
+            # Block joins insert a space; CJK scripts must not keep it (spablm/RV1909 must).
+            text = CJK_JOIN_PATTERN.sub("", text)
             if not text and verse_number in omitted:
                 text = OMITTED_VERSE_TEXT
             if text:

@@ -864,6 +864,87 @@ def test_parse_verses_from_ebible_page_keeps_body_text_that_has_a_footnote() -> 
     assert "En el principio" in verses[0].text
 
 
+def _jpnm_scraper() -> HolyBibleScraper:
+    scraper = HolyBibleScraper(entry_url="https://ebible.org/jpnm/GEN01.htm")
+    scraper.sleep_min = 0.0
+    scraper.sleep_max = 0.0
+    return scraper
+
+
+def test_parse_verses_from_ebible_page_joins_japanese_without_space() -> None:
+    """Japanese writes no spaces between words, so the block join must not add one.
+
+    The same separator is required for Spanish and English, which is why the rule is
+    conditioned on both sides being CJK rather than removed outright.
+    """
+    html = """
+    <div class="main">
+      <div class="q"><span class="verse" id="V1">1&nbsp;</span>主は私の羊飼い。</div>
+      <div class="q2">私は何も欠けることがない。</div>
+      <div class="p"><span class="verse" id="V2">2&nbsp;</span>したのか。」</div>
+      <div class="p">女は言った。</div>
+    </div>
+    """
+    verses = _jpnm_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [1, 2]
+    assert verses[0].text == "主は私の羊飼い。私は何も欠けることがない。"
+    assert verses[1].text == "したのか。」女は言った。"
+
+
+def test_parse_verses_from_ebible_page_keeps_space_between_latin_words() -> None:
+    """The Spanish/English block join still needs its space."""
+    html = """
+    <div class="main">
+      <div class="p"><span class="verse" id="V13">13&nbsp;</span>&#191;Qu&#233; has hecho?</div>
+      <div class="p">Y dijo la mujer.</div>
+    </div>
+    """
+    verses = _ebible_scraper().parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert verses[0].text == "¿Qué has hecho? Y dijo la mujer."
+
+
+def test_parse_verses_from_ebible_page_keeps_spaces_in_korean_text() -> None:
+    """Hangul must stay outside the CJK range: Korean separates its words with spaces.
+
+    Collapsing here would mirror the bskorea particle bug, turning '모세가 말하되'
+    into an unreadable run.
+    """
+    html = """
+    <div class="main">
+      <div class="p"><span class="verse" id="V1">1&nbsp;</span>모세가 말하되</div>
+      <div class="p">여호와께서 이르시니라</div>
+    </div>
+    """
+    verses = _ebible_scraper().parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert verses[0].text == "모세가 말하되 여호와께서 이르시니라"
+
+
+def test_parse_verses_from_ebible_page_keeps_space_between_cjk_and_latin() -> None:
+    """Only CJK-to-CJK collapses; a Latin word embedded in Japanese keeps its spaces."""
+    html = """
+    <div class="main">
+      <div class="p"><span class="verse" id="V1">1&nbsp;</span>使徒 Paul は言った。</div>
+    </div>
+    """
+    verses = _jpnm_scraper().parse_verses_from_html(html)
+
+    assert verses[0].text == "使徒 Paul は言った。"
+
+
+def test_ebible_chapter_urls_follow_jpnm_translation_code() -> None:
+    scraper = _jpnm_scraper()
+
+    assert scraper.get_source_name() == "ebible"
+    assert scraper.get_source_version() == "jpnm"
+    assert scraper._build_ebible_url(1, 1) == "https://ebible.org/jpnm/GEN01.htm"
+    assert scraper._build_ebible_url(19, 23) == "https://ebible.org/jpnm/PSA023.htm"
+
+
 def test_ebible_parser_returns_empty_for_other_sources() -> None:
     scraper = _ebible_scraper()
     soup = BeautifulSoup("<div class='bible_read'><p>1 text</p></div>", "html.parser")

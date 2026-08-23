@@ -584,12 +584,20 @@ def test_validate_source_translation_compatibility_rejects_unmapped_version_with
 
 EBIBLE_RV1909_ENTRY_URL = "https://ebible.org/spaRV1909/GEN01.htm"
 EBIBLE_SBLM_ENTRY_URL = "https://ebible.org/spablm/GEN01.htm"
+EBIBLE_JFB_ENTRY_URL = "https://ebible.org/jpnm/GEN01.htm"
 
 RVR1909_TRANSLATION_METADATA = {
     "id": 29,
     "language_code": "es",
     "name": "Reina Valera 1909",
     "translation_type": "RVR1909",
+}
+
+JFB_TRANSLATION_METADATA = {
+    "id": 36,
+    "language_code": "ja",
+    "name": "フリーダム・バイブル",
+    "translation_type": "JFB",
 }
 
 SBLM_TRANSLATION_METADATA = {
@@ -702,6 +710,45 @@ def test_resolve_default_entry_url_picks_sblm_when_translation_type_declared() -
         "BIBLE_TRANSLATION_TYPE": "SBLM",
     }):
         assert resolve_default_entry_url() == EBIBLE_SBLM_ENTRY_URL
+
+
+def test_validate_source_translation_compatibility_for_ebible_jfb() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(JFB_TRANSLATION_METADATA)
+    scraper = EbibleScraper(EBIBLE_JFB_ENTRY_URL)
+
+    validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+
+
+def test_validate_source_translation_compatibility_separates_three_ebible_translations() -> None:
+    """eBible now serves three translations, so the path token has to tell them apart."""
+    pairs = [
+        (EBIBLE_JFB_ENTRY_URL, SBLM_TRANSLATION_METADATA),
+        (EBIBLE_JFB_ENTRY_URL, RVR1909_TRANSLATION_METADATA),
+        (EBIBLE_SBLM_ENTRY_URL, JFB_TRANSLATION_METADATA),
+        (EBIBLE_RV1909_ENTRY_URL, JFB_TRANSLATION_METADATA),
+    ]
+    for entry_url, metadata in pairs:
+        repo = FakeRepo()
+        conn = FakeConn()
+        conn.translation_metadata = dict(metadata)
+        scraper = EbibleScraper(entry_url)
+        try:
+            validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+        except RuntimeError as exc:
+            assert "Source/translation mismatch" in str(exc)
+        else:
+            raise AssertionError(f"expected RuntimeError for {entry_url} + {metadata['translation_type']}")
+
+
+def test_resolve_default_entry_url_picks_jfb_for_japanese() -> None:
+    with _with_entry_url_env({
+        "JFB_ENTRY_URL": EBIBLE_JFB_ENTRY_URL,
+        "SBLM_ENTRY_URL": EBIBLE_SBLM_ENTRY_URL,
+        "BIBLE_LANGUAGE_CODE": "ja",
+    }):
+        assert resolve_default_entry_url() == EBIBLE_JFB_ENTRY_URL
 
 
 def test_validate_source_translation_compatibility_rejects_ebible_with_rvr1960() -> None:
