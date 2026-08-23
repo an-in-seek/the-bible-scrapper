@@ -45,6 +45,7 @@
 - `docs/reina-valera-1909-scraping-design.md`: RVR1909 설계 문서
 - `docs/santa-biblia-libre-para-el-mundo-scraping-design.md`: SBLM 설계 문서
 - `docs/japanese-public-domain-scraping-design.md`: JPNMEB(일본어) 설계 문서
+- `docs/new-japanese-nt-scraping-design.md`: JPNLOC(일본어 신약) 설계 문서 (미구현)
 
 ## 요구 사항
 
