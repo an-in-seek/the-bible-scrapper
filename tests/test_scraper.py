@@ -978,3 +978,186 @@ def test_biblegateway_parser_returns_empty_for_other_sources() -> None:
     soup = BeautifulSoup("<div class='bible_read'><p>1 text</p></div>", "html.parser")
 
     assert scraper._extract_verses_from_biblegateway_passage(soup) == []
+
+
+JPNBIBLE_ENTRY_URL = "https://jpn.bible/kougo/gen#1"
+# One chapter as jpn.bible slices it out of the book page: prose verses keep the body
+# inside span.verse-content, and every kanji carries a furigana reading.
+JPNBIBLE_PROSE_CHAPTER_HTML = """
+<div id="1"><h2 class="chapter-title"><a href="#1">第一章</a></h2>
+<p>
+<span class="verse" id="1:1"><span class="verse-number"><a href="#1:1">1</a></span>
+<span class="verse-content">はじめに<ruby>神<rp>（</rp><rt>かみ</rt><rp>）</rp></ruby>は<ruby>天<rp>（</rp><rt>てん</rt><rp>）</rp></ruby>と<ruby>地<rp>（</rp><rt>ち</rt><rp>）</rp></ruby>とを<ruby>創造<rp>（</rp><rt>そうぞう</rt><rp>）</rp></ruby>された。</span></span>
+<span class="verse" id="1:2"><span class="verse-number"><a href="#1:2">2</a></span>
+<span class="verse-content"><ruby>地<rp>（</rp><rt>ち</rt><rp>）</rp></ruby>は<ruby>形<rp>（</rp><rt>かたち</rt><rp>）</rp></ruby>なく、むなしく。</span></span>
+</p></div>
+"""
+# Poetry: verse-content is empty and the body runs to an explicit end marker.
+JPNBIBLE_POETRY_CHAPTER_HTML = """
+<div id="3"><h2 class="chapter-title"><a href="#3">第三篇</a></h2>
+<p>
+<title type="psalm" canonical="true">ダビデの歌</title>
+<span class="lg"><span class="l"><span class="verse" id="3:1" data-s-id="3:1"><span class="verse-number"><a href="#3:1">1</a></span><span class="verse-content"/></span>主よ、わたしに敵する者の<br/></span>
+<span class="l">いかに多いことでしょう。<span class="verse" data-e-id="3:1"/><br/></span>
+<span class="l"><span class="verse" id="3:2" data-s-id="3:2"><span class="verse-number"><a href="#3:2">2</a></span><span class="verse-content"/></span>わたしについて言う者が多いのです。〔セラ<span class="verse" data-e-id="3:2"/><br/></span></span>
+</p></div>
+"""
+
+
+def _jpnbible_scraper() -> HolyBibleScraper:
+    return HolyBibleScraper(entry_url=JPNBIBLE_ENTRY_URL)
+
+
+def test_jpnbible_source_is_recognised() -> None:
+    scraper = _jpnbible_scraper()
+
+    assert scraper.get_source_name() == "jpnbible"
+    # The translation code lives in the path, not the query string.
+    assert scraper.get_source_version() == "kougo"
+    assert scraper.sleep_min >= 1.0
+
+
+def test_jpnbible_chapter_urls_carry_the_chapter_as_a_fragment() -> None:
+    scraper = _jpnbible_scraper()
+
+    assert scraper._build_chapter_url(1, 1) == "https://jpn.bible/kougo/gen#1"
+    assert scraper._build_chapter_url(19, 119) == "https://jpn.bible/kougo/ps#119"
+    # The slug table is not bible_book.book_key: /kougo/sng and /kougo/phm are 404.
+    assert scraper._build_chapter_url(22, 1) == "https://jpn.bible/kougo/song#1"
+    assert scraper._build_chapter_url(57, 1) == "https://jpn.bible/kougo/phlm#1"
+
+
+def test_discover_jpnbible_chapter_urls_uses_canonical_count() -> None:
+    scraper = _jpnbible_scraper()
+
+    assert len(scraper.discover_chapter_urls_for_book(1)) == 50
+    assert len(scraper.discover_chapter_urls_for_book(19)) == 150
+    assert len(scraper.discover_chapter_urls_for_book(65)) == 1
+
+
+def test_jpnbible_prose_chapter_drops_ruby_readings() -> None:
+    verses = _jpnbible_scraper().parse_verses_from_html(JPNBIBLE_PROSE_CHAPTER_HTML)
+
+    assert [verse.verse_number for verse in verses] == [1, 2]
+    # get_text() would already look clean here; the descendants walk would not.
+    assert verses[0].text == "はじめに神は天と地とを創造された。"
+    assert "かみ" not in verses[0].text
+    assert "（" not in verses[0].text
+    # The rendered marker is the verse number, never body text.
+    assert not verses[0].text.startswith("1")
+    # The chapter heading must not leak in.
+    assert all("第一章" not in verse.text for verse in verses)
+
+
+def test_jpnbible_poetry_chapter_accumulates_between_markers() -> None:
+    verses = _jpnbible_scraper().parse_verses_from_html(JPNBIBLE_POETRY_CHAPTER_HTML)
+
+    assert [verse.verse_number for verse in verses] == [1, 2]
+    # <br> boundaries must not leave a space between CJK characters.
+    assert verses[0].text == "主よ、わたしに敵する者のいかに多いことでしょう。"
+    assert verses[1].text.endswith("〔セラ")
+    # The psalm superscription is not stored, matching every other translation here.
+    assert all("ダビデの歌" not in verse.text for verse in verses)
+
+
+def test_jpnbible_merged_range_is_stored_at_every_number() -> None:
+    html = """
+    <div id="132">
+      <p><span class="verse" id="132:3 Ps.132.4 Ps.132.5"><span class="verse-number">5</span><span class="verse-content">わたしは主のために所を捜し出し</span></span>
+      <span class="verse" id="132:6"><span class="verse-number">6</span><span class="verse-content">見よ、われらはエフラタでそれを聞き</span></span></p>
+    </div>
+    """
+    verses = _jpnbible_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [3, 4, 5, 6]
+    # Reading only the first extra token would lose verse 5.
+    assert verses[0].text == verses[1].text == verses[2].text
+    assert verses[3].text.startswith("見よ")
+
+
+def test_jpnbible_split_verse_joins_in_suffix_order() -> None:
+    # Exodus 22 prints 3b before 3a, so document order reverses the sentence.
+    html = """
+    <div id="22">
+      <p><span class="verse" id="22:3!b"><span class="verse-number">3</span><span class="verse-content">彼は必ず償わなければならない。</span></span>
+      <span class="verse" id="22:2"><span class="verse-number">2</span><span class="verse-content">その人には血を流した罪はない。</span></span>
+      <span class="verse" id="22:3!a"><span class="verse-number">3</span><span class="verse-content">しかし日がのぼって後ならば、</span></span></p>
+    </div>
+    """
+    verses = _jpnbible_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [2, 3]
+    assert verses[1].text == "しかし日がのぼって後ならば、彼は必ず償わなければならない。"
+
+
+def test_jpnbible_moves_a_trailing_opening_bracket_to_the_next_verse() -> None:
+    html = """
+    <div id="17">
+      <p><span class="verse" id="17:20"><span class="verse-number">20</span><span class="verse-content">何もないであろう。〔</span></span>
+      <span class="verse" id="17:21"><span class="verse-number">21</span><span class="verse-content">追い出すことはできない〕」。</span></span></p>
+    </div>
+    """
+    verses = _jpnbible_scraper().parse_verses_from_html(html)
+
+    assert verses[0].text == "何もないであろう。"
+    assert verses[1].text == "〔追い出すことはできない〕」。"
+
+
+def test_jpnbible_ignores_an_implausible_range() -> None:
+    html = """
+    <div id="1">
+      <p><span class="verse" id="1:1 Gen.1.99"><span class="verse-number">1</span><span class="verse-content">本文</span></span></p>
+    </div>
+    """
+    verses = _jpnbible_scraper().parse_verses_from_html(html)
+
+    # Duplicating one verse across 99 numbers is worse than ignoring the range.
+    assert [verse.verse_number for verse in verses] == [1]
+
+
+def test_jpnbible_book_page_is_fetched_once_per_book() -> None:
+    scraper = _jpnbible_scraper()
+    requested: list[str] = []
+
+    def fake_request(url: str) -> str:
+        requested.append(url)
+        return '<main class="book">' + JPNBIBLE_PROSE_CHAPTER_HTML + "</main>"
+
+    scraper._request_html = fake_request  # type: ignore[assignment]
+
+    first = scraper.fetch_chapter_payload(1, 1)
+    second = scraper.fetch_chapter_payload(1, 1, chapter_url="https://jpn.bible/kougo/gen#1")
+
+    assert [verse.verse_number for verse in first.verses] == [1, 2]
+    assert second.verses == first.verses
+    # One page per book, and the fragment never reaches the HTTP layer.
+    assert requested == ["https://jpn.bible/kougo/gen"]
+
+
+def test_jpnbible_missing_chapter_yields_no_verses() -> None:
+    scraper = _jpnbible_scraper()
+    scraper._request_html = lambda url: '<main class="book"><div id="1"></div></main>'  # type: ignore[assignment]
+
+    payload = scraper.fetch_chapter_payload(1, 7)
+
+    # An absent chapter must be empty, not an exception: the empty-data guard skips it
+    # before anything is written.
+    assert payload.verses == []
+
+
+def test_jpnbible_parser_returns_empty_for_other_sources() -> None:
+    scraper = _jpnbible_scraper()
+
+    for html in (
+        "<div class='bible_read'><p>1 text</p></div>",
+        "<div class='main'><div class='p'><span class='verse' id='V1'>1 </span>texto</div></div>",
+        "<div id='contents'><p><span class='section'>1</span>本文</p></div>",
+    ):
+        assert scraper._extract_verses_from_jpnbible_page(BeautifulSoup(html, "html.parser")) == []
+
+
+def test_ebible_parser_returns_empty_for_a_jpnbible_page() -> None:
+    scraper = _ebible_scraper()
+    soup = BeautifulSoup(JPNBIBLE_PROSE_CHAPTER_HTML, "html.parser")
+
+    assert scraper._extract_verses_from_ebible_page(soup) == []

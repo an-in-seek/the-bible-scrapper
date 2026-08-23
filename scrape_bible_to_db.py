@@ -23,17 +23,20 @@ ENTRY_URL_ENV_BY_TRANSLATION_TYPE = {
     "RVR1909": "RVR1909_ENTRY_URL",
     "SBLM": "SBLM_ENTRY_URL",
     "JPNMEB": "JPNMEB_ENTRY_URL",
+    "KOUGO": "KOUGO_ENTRY_URL",
 }
 # A language code alone does not identify a source: 'en' covers KJV, WEB and ASV.
 TRANSLATION_TYPES_BY_LANGUAGE_CODE = {
     "ko": ("NKRV",),
     "en": ("KJV", "WEB", "ASV"),
     "es": ("RVR1909", "SBLM"),
-    "ja": ("JPNMEB",),
+    "ja": ("JPNMEB", "KOUGO"),
 }
 LEGACY_TRANSLATION_TYPE_BY_ID = {"2": "NKRV"}
 # Tie-break when nothing else narrows it down; keeps the pre-WEB default.
-ENTRY_URL_PREFERENCE_ORDER = ("NKRV", "KJV", "WEB", "ASV", "RVR1909", "SBLM", "JPNMEB")
+ENTRY_URL_PREFERENCE_ORDER = (
+    "NKRV", "KJV", "WEB", "ASV", "RVR1909", "SBLM", "JPNMEB", "KOUGO",
+)
 # Which source may legitimately produce each translation, and how to recognise the
 # translation when bible_translation.translation_type is empty. Drives the
 # source/translation check in both directions, so adding a translation is one row.
@@ -80,6 +83,13 @@ TRANSLATION_SOURCE_REQUIREMENTS = {
         "source": "ebible",
         "version": "jpnm",
         "name": "フリーダム・バイブル",
+        "language_code": "ja",
+    },
+    "KOUGO": {
+        # jpn.bible puts the translation code in the path (/kougo/), like eBible.
+        "source": "jpnbible",
+        "version": "kougo",
+        "name": "口語訳聖書",
         "language_code": "ja",
     },
 }

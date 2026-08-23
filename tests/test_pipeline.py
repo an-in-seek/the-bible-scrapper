@@ -68,6 +68,8 @@ class FakeScraper:
     get_source_version = HolyBibleScraper.get_source_version
     _is_ebible_source = HolyBibleScraper._is_ebible_source
     _get_ebible_translation_code = HolyBibleScraper._get_ebible_translation_code
+    _is_jpnbible_source = HolyBibleScraper._is_jpnbible_source
+    _get_jpnbible_translation_code = HolyBibleScraper._get_jpnbible_translation_code
 
     def __init__(self, entry_url: str) -> None:
         self.entry_url = entry_url
@@ -959,3 +961,149 @@ def test_get_verse_texts_returns_empty_dict_for_empty_chapter() -> None:
 
     repo = BibleRepository(translation_id=33)
     assert repo.get_verse_texts(_RowConn([]), 1) == {}
+
+
+def _with_env(**values):
+    """Set env vars for the duration of a call and restore them afterwards."""
+    original = {key: os.getenv(key) for key in values}
+
+    def restore() -> None:
+        for key, value in original.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    for key, value in values.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+    return restore
+
+
+def test_resolve_default_entry_url_rejects_ambiguous_japanese() -> None:
+    # 'ja' now covers two translations, so the language code alone no longer identifies
+    # a source - the same trap 'en' has. Raising beats silently loading the wrong text.
+    restore = _with_env(
+        JPNMEB_ENTRY_URL="https://ebible.org/jpnm/GEN01.htm",
+        KOUGO_ENTRY_URL="https://jpn.bible/kougo/gen#1",
+        BIBLE_LANGUAGE_CODE="ja",
+        BIBLE_TRANSLATION_TYPE=None,
+        BIBLE_TRANSLATION_ID=None,
+        BIBLE_TRANSLATION_NAME=None,
+        KJV_ENTRY_URL=None,
+        NKRV_ENTRY_URL=None,
+        WEB_ENTRY_URL=None,
+        ASV_ENTRY_URL=None,
+        RVR1909_ENTRY_URL=None,
+        SBLM_ENTRY_URL=None,
+    )
+    try:
+        try:
+            resolve_default_entry_url()
+        except ValueError as exc:
+            assert "Ambiguous entry URL" in str(exc)
+            assert "JPNMEB_ENTRY_URL" in str(exc)
+            assert "KOUGO_ENTRY_URL" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")
+    finally:
+        restore()
+
+
+def test_resolve_default_entry_url_keeps_jpnmeb_when_type_is_declared() -> None:
+    restore = _with_env(
+        JPNMEB_ENTRY_URL="https://ebible.org/jpnm/GEN01.htm",
+        KOUGO_ENTRY_URL="https://jpn.bible/kougo/gen#1",
+        BIBLE_LANGUAGE_CODE="ja",
+        BIBLE_TRANSLATION_TYPE="JPNMEB",
+        BIBLE_TRANSLATION_ID=None,
+        BIBLE_TRANSLATION_NAME=None,
+        KJV_ENTRY_URL=None,
+        NKRV_ENTRY_URL=None,
+        WEB_ENTRY_URL=None,
+        ASV_ENTRY_URL=None,
+        RVR1909_ENTRY_URL=None,
+        SBLM_ENTRY_URL=None,
+    )
+    try:
+        assert resolve_default_entry_url() == "https://ebible.org/jpnm/GEN01.htm"
+    finally:
+        restore()
+
+
+def test_resolve_default_entry_url_selects_kougo_when_type_is_declared() -> None:
+    restore = _with_env(
+        JPNMEB_ENTRY_URL="https://ebible.org/jpnm/GEN01.htm",
+        KOUGO_ENTRY_URL="https://jpn.bible/kougo/gen#1",
+        BIBLE_LANGUAGE_CODE="ja",
+        BIBLE_TRANSLATION_TYPE="KOUGO",
+        BIBLE_TRANSLATION_ID=None,
+        BIBLE_TRANSLATION_NAME=None,
+        KJV_ENTRY_URL=None,
+        NKRV_ENTRY_URL=None,
+        WEB_ENTRY_URL=None,
+        ASV_ENTRY_URL=None,
+        RVR1909_ENTRY_URL=None,
+        SBLM_ENTRY_URL=None,
+    )
+    try:
+        assert resolve_default_entry_url() == "https://jpn.bible/kougo/gen#1"
+    finally:
+        restore()
+
+
+def test_validate_source_translation_compatibility_for_jpnbible_kougo() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = {
+        "id": 37,
+        "language_code": "ja",
+        "name": "口語訳聖書",
+        "translation_type": "KOUGO",
+    }
+
+    class JpnBibleScraper(FakeScraper):
+        def get_source_name(self) -> str:
+            return "jpnbible"
+
+    validate_source_translation_compatibility(
+        repo=repo, conn=conn, scraper=JpnBibleScraper("https://jpn.bible/kougo/gen#1")
+    )
+
+
+def test_validate_source_translation_compatibility_rejects_jpnbible_with_jpnmeb() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = {
+        "id": 36,
+        "language_code": "ja",
+        "name": "フリーダム・バイブル",
+        "translation_type": "JPNMEB",
+    }
+
+    class JpnBibleScraper(FakeScraper):
+        def get_source_name(self) -> str:
+            return "jpnbible"
+
+    try:
+        validate_source_translation_compatibility(
+            repo=repo, conn=conn, scraper=JpnBibleScraper("https://jpn.bible/kougo/gen#1")
+        )
+    except RuntimeError as exc:
+        assert "Source/translation mismatch" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_resolve_book_code_for_source_is_none_for_jpnbible() -> None:
+    class JpnBibleScraper(FakeScraper):
+        def get_source_name(self) -> str:
+            return "jpnbible"
+
+    scraper = JpnBibleScraper("https://jpn.bible/kougo/gen#1")
+    book = Book(id=1, book_order=22, book_key="SNG", name="雅歌", abbreviation="SNG")
+
+    # book_key would build /kougo/sng, which is a 404: the slug table must win.
+    assert resolve_book_code_for_source(scraper, book) is None
