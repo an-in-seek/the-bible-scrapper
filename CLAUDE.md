@@ -29,6 +29,7 @@ Design documents:
 - [docs/japanese-public-domain-scraping-design.md](docs/japanese-public-domain-scraping-design.md) — JPNMEB (Japanese)
 - [docs/new-japanese-nt-scraping-design.md](docs/new-japanese-nt-scraping-design.md) — JPNLOC (Japanese NT, 설계만·미구현)
 - [docs/japanese-colloquial-1955-scraping-design.md](docs/japanese-colloquial-1955-scraping-design.md) — KOUGO (口語訳 1954/1955)
+- [docs/chinese-union-version-1919-scraping-design.md](docs/chinese-union-version-1919-scraping-design.md) — CUVT/CUVS (和合本 1919, 설계만·미구현)
 
 ## Common commands
 
