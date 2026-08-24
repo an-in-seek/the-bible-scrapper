@@ -1161,3 +1161,73 @@ def test_ebible_parser_returns_empty_for_a_jpnbible_page() -> None:
     soup = BeautifulSoup(JPNBIBLE_PROSE_CHAPTER_HTML, "html.parser")
 
     assert scraper._extract_verses_from_ebible_page(soup) == []
+
+
+def test_jpnbible_rejects_a_multi_chapter_page() -> None:
+    # _fetch_soup always slices one chapter out of the book page. If that ever broke,
+    # the accumulator would concatenate every chapter's verse 1 into a single verse 1
+    # and return a full, contiguous list - which no verse-count check would catch.
+    scraper = _jpnbible_scraper()
+    html = """
+    <main class="book">
+      <div id="1"><p><span class="verse" id="1:1"><span class="verse-number">1</span>
+      <span class="verse-content">第一章の一節</span></span></p></div>
+      <div id="2"><p><span class="verse" id="2:1"><span class="verse-number">1</span>
+      <span class="verse-content">第二章の一節</span></span></p></div>
+    </main>
+    """
+    soup = BeautifulSoup(html, "html.parser")
+
+    assert scraper._extract_verses_from_jpnbible_page(soup) == []
+
+
+def test_jpnbible_cache_is_replaced_when_the_book_changes() -> None:
+    # The other half of the cache contract: if the page-URL comparison were wrong, the
+    # second book would silently serve the first book's chapters.
+    scraper = _jpnbible_scraper()
+    requested: list[str] = []
+
+    def fake_request(url: str) -> str:
+        requested.append(url)
+        slug = url.rsplit("/", 1)[-1]
+        return (
+            '<main class="book"><div id="1"><p>'
+            '<span class="verse" id="1:1"><span class="verse-number">1</span>'
+            f'<span class="verse-content">{slug}の本文</span></span></p></div></main>'
+        )
+
+    scraper._request_html = fake_request  # type: ignore[assignment]
+
+    first = scraper.fetch_chapter_payload(1, 1)
+    second = scraper.fetch_chapter_payload(2, 1)
+
+    assert first.verses[0].text == "genの本文"
+    assert second.verses[0].text == "exodの本文"
+    assert requested == ["https://jpn.bible/kougo/gen", "https://jpn.bible/kougo/exod"]
+
+
+def test_jpnbible_refetches_the_book_after_a_failed_request() -> None:
+    # A book-level retry must not reuse a half-built cache: the failed request never
+    # assigns one, so the next attempt fetches the page again.
+    scraper = _jpnbible_scraper()
+    attempts: list[str] = []
+
+    def flaky_request(url: str) -> str:
+        attempts.append(url)
+        if len(attempts) == 1:
+            raise RuntimeError("boom")
+        return '<main class="book">' + JPNBIBLE_PROSE_CHAPTER_HTML + "</main>"
+
+    scraper._request_html = flaky_request  # type: ignore[assignment]
+
+    try:
+        scraper.fetch_chapter_payload(1, 1)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    payload = scraper.fetch_chapter_payload(1, 1)
+
+    assert [verse.verse_number for verse in payload.verses] == [1, 2]
+    assert attempts == ["https://jpn.bible/kougo/gen", "https://jpn.bible/kougo/gen"]

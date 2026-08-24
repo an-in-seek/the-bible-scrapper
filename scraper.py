@@ -371,6 +371,10 @@ class HolyBibleScraper:
         soup = BeautifulSoup(html, "html.parser")
         container = soup.select_one("main.book")
         if container is None:
+            # Every chapter of this book will now parse to nothing and the book fails
+            # its empty-data guard. That is the right outcome, but it is only traceable
+            # to the page structure if it is said here.
+            logger.warning("jpn.bible page has no main.book container; chapter split is empty")
             return {}
 
         chapters: dict[str, str] = {}
@@ -1025,13 +1029,13 @@ class HolyBibleScraper:
 
         return cleaned
 
-    def _parse_jpnbible_verse_id(self, raw_id: str | None) -> tuple[int, int, str] | None:
+    def _parse_jpnbible_verse_id(self, raw_id: str | None) -> tuple[int, int, int, str] | None:
         """
-        Read a jpn.bible verse id into (first verse, last verse, split suffix).
+        Read a jpn.bible verse id into (chapter, first verse, last verse, split suffix).
 
-        "3:16"                    -> (16, 16, "")
-        "22:3!a"                  -> (3, 3, "a")     one half of a split verse
-        "132:3 Ps.132.4 Ps.132.5" -> (3, 5, "")      merged range, every member listed
+        "3:16"                    -> (3, 16, 16, "")
+        "22:3!a"                  -> (22, 3, 3, "a")   one half of a split verse
+        "132:3 Ps.132.4 Ps.132.5" -> (132, 3, 5, "")   merged range, every member listed
         """
         if not raw_id:
             return None
@@ -1041,6 +1045,7 @@ class HolyBibleScraper:
         if match is None:
             return None
 
+        chapter = int(match.group(1))
         start = int(match.group(2))
         suffix = match.group(3) or ""
         end = start
@@ -1052,7 +1057,7 @@ class HolyBibleScraper:
 
         if end < start or end - start > JPNBIBLE_MAX_RANGE_WIDTH:
             end = start
-        return start, end, suffix
+        return chapter, start, end, suffix
 
     def _extract_verses_from_jpnbible_page(self, soup: BeautifulSoup) -> list[Verse]:
         """
@@ -1076,8 +1081,8 @@ class HolyBibleScraper:
         for removable in working.select(JPNBIBLE_REMOVABLE_SELECTOR):
             removable.decompose()
 
-        chunks: dict[tuple[int, int, str], list[str]] = {}
-        current: tuple[int, int, str] | None = None
+        chunks: dict[tuple[int, int, int, str], list[str]] = {}
+        current: tuple[int, int, int, str] | None = None
         block_changed = False
 
         for node in working.descendants:
@@ -1106,10 +1111,25 @@ class HolyBibleScraper:
             chunks[current].append((" " if block_changed else "") + text)
             block_changed = False
 
+        # A whole book page would otherwise come back as one plausible, contiguous verse
+        # list with every chapter's verse 1 concatenated. Callers must pass a chapter,
+        # and the only way here is a broken _split_jpnbible_book, so say so loudly: the
+        # generic parsers downstream would happily produce a full verse list from it.
+        chapters_seen = {key[0] for key in chunks}
+        if len(chapters_seen) > 1:
+            logger.warning(
+                "jpn.bible page carries %d chapters (%s...); expected a single chapter slice",
+                len(chapters_seen),
+                sorted(chapters_seen)[:5],
+            )
+            return []
+
         # Join the halves of a split verse in suffix order. Exodus 22 prints 3b before
         # 3a, so document order would reverse the sentence.
         merged: dict[tuple[int, int], list[str]] = {}
-        for (start, end, suffix), parts in sorted(chunks.items(), key=lambda kv: (kv[0][0], kv[0][2])):
+        for (_chapter, start, end, suffix), parts in sorted(
+            chunks.items(), key=lambda kv: (kv[0][1], kv[0][3])
+        ):
             merged.setdefault((start, end), []).append("".join(parts))
 
         entries: list[list] = []
