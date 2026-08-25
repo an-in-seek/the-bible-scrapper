@@ -2,7 +2,7 @@
 
 성경 본문을 스크래핑해 PostgreSQL의 `bible_chapter`, `bible_verse`에 적재하는 도구입니다.
 
-현재 기준으로 안정적으로 맞춰진 소스는 아래 8개입니다.
+현재 기준으로 안정적으로 맞춰진 소스는 아래 10개입니다.
 
 - `thekingsbible.com` KJV
 - `bskorea.or.kr` NKRV(`version=GAE`)
@@ -12,6 +12,8 @@
 - `ebible.org` SBLM(`spablm`, Santa Biblia libre para el mundo — 스페인어)
 - `ebible.org` JPNMEB(`jpnm`, フリーダム・バイブル — 일본어)
 - `jpn.bible` KOUGO(`kougo`, 口語訳聖書 1954/1955 — 일본어)
+- `zh.wikisource.org` CUVT(`zh-hant`, 聖經和合本 1919 — 중국어 번체)
+- `zh.wikisource.org` CUVS(`zh-hans`, 圣经和合本 1919 — 중국어 간체)
 
 설계 문서:
 
@@ -22,6 +24,7 @@
 - SBLM: [docs/santa-biblia-libre-para-el-mundo-scraping-design.md](docs/santa-biblia-libre-para-el-mundo-scraping-design.md)
 - JPNMEB: [docs/japanese-public-domain-scraping-design.md](docs/japanese-public-domain-scraping-design.md)
 - KOUGO: [docs/japanese-colloquial-1955-scraping-design.md](docs/japanese-colloquial-1955-scraping-design.md)
+- CUVT/CUVS: [docs/chinese-union-version-1919-scraping-design.md](docs/chinese-union-version-1919-scraping-design.md)
 
 ## 주요 특징
 
@@ -53,7 +56,7 @@
 - `docs/japanese-public-domain-scraping-design.md`: JPNMEB(일본어) 설계 문서
 - `docs/new-japanese-nt-scraping-design.md`: JPNLOC(일본어 신약) 설계 문서 (미구현)
 - `docs/japanese-colloquial-1955-scraping-design.md`: KOUGO(일본어 口語訳 1954/1955) 설계 문서
-- `docs/chinese-union-version-1919-scraping-design.md`: CUVT/CUVS(중국어 和合本 1919) 설계 문서 (미구현)
+- `docs/chinese-union-version-1919-scraping-design.md`: CUVT/CUVS(중국어 和合本 1919) 설계 문서
 
 ## 요구 사항
 
@@ -104,23 +107,26 @@ RVR1909_ENTRY_URL=https://ebible.org/spaRV1909/GEN01.htm
 SBLM_ENTRY_URL=https://ebible.org/spablm/GEN01.htm
 JPNMEB_ENTRY_URL=https://ebible.org/jpnm/GEN01.htm
 KOUGO_ENTRY_URL=https://jpn.bible/kougo/gen#1
+CUVT_ENTRY_URL=https://zh.wikisource.org/zh-hant/%E8%81%96%E7%B6%93_(%E5%92%8C%E5%90%88%E6%9C%AC)/%E5%89%B5%E4%B8%96%E8%A8%98#1
+CUVS_ENTRY_URL=https://zh.wikisource.org/zh-hans/%E8%81%96%E7%B6%93_(%E5%92%8C%E5%90%88%E6%9C%AC)/%E5%89%B5%E4%B8%96%E8%A8%98#1
 ```
 
 `--entry-url`를 지정하지 않으면 기본 URL은 아래 순서로 결정됩니다.
 
-1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JPNMEB` / `KOUGO`)에 해당하는 환경변수
+1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JPNMEB` / `KOUGO` / `CUVT` / `CUVS`)에 해당하는 환경변수
 2. `BIBLE_TRANSLATION_ID=2` 또는 `BIBLE_TRANSLATION_NAME=개역개정`이면 `NKRV_ENTRY_URL`
 3. `BIBLE_LANGUAGE_CODE`로 좁혀지는 소스가 하나면 그 값
    - `ko` -> `NKRV_ENTRY_URL`
    - `en` -> `KJV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` 중 설정된 것
    - `es` -> `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` 중 설정된 것
    - `ja` -> `JPNMEB_ENTRY_URL` / `KOUGO_ENTRY_URL` 중 설정된 것
+   - `zh` -> `CUVT_ENTRY_URL` / `CUVS_ENTRY_URL` 중 설정된 것
 4. 설정된 엔트리 URL이 하나뿐이면 그 값
-5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JPNMEB` -> `KOUGO` 순으로 선택
+5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JPNMEB` -> `KOUGO` -> `CUVT` -> `CUVS` 순으로 선택
 6. 아무것도 없으면 내장 기본값 `https://thekingsbible.com/Bible/1/1` 사용
 
 주의: `BIBLE_LANGUAGE_CODE`만으로는 소스가 특정되지 않습니다.  
-`en`(KJV / WEB / ASV), `es`(RVR1909 / SBLM), `ja`(JPNMEB / KOUGO) 모두 소스가 둘 이상이라,  
+`en`(KJV / WEB / ASV), `es`(RVR1909 / SBLM), `ja`(JPNMEB / KOUGO), `zh`(CUVT / CUVS) 모두 소스가 둘 이상이라,  
 해당 엔트리 URL이 여러 개 설정된 상태에서 언어 코드만 주면 실행이 중단됩니다.  
 이때는 `BIBLE_TRANSLATION_TYPE`을 지정하거나 `--entry-url`을 명시해야 합니다.
 
@@ -376,6 +382,36 @@ KOUGO_ENTRY_URL=https://jpn.bible/kougo/gen#1
 **본문에 일본성서협회가 이후 訂正한 표현이 그대로 들어 있습니다**(「おしの霊」「らい病人」 등).
 만료된 것은 1954/1955 원본이고 訂正된 낱말에는 저작권이 남아 있어, 訂正 후 본문을 쓰려면
 협회의 허락 절차가 필요합니다.
+
+### 9. CUVT / CUVS `zh.wikisource.org`
+
+『聖經和合本』(1919). 중국어권 표준 텍스트이며 1931년 이전 발행이라 관할을 가리지 않고
+퍼블릭 도메인입니다. 자세한 근거는 [설계 문서](docs/chinese-union-version-1919-scraping-design.md) 1장에 있습니다.
+
+```env
+CUVT_ENTRY_URL=https://zh.wikisource.org/zh-hant/%E8%81%96%E7%B6%93_(%E5%92%8C%E5%90%88%E6%9C%AC)/%E5%89%B5%E4%B8%96%E8%A8%98#1
+CUVS_ENTRY_URL=https://zh.wikisource.org/zh-hans/%E8%81%96%E7%B6%93_(%E5%92%8C%E5%90%88%E6%9C%AC)/%E5%89%B5%E4%B8%96%E8%A8%98#1
+```
+
+**번체와 간체는 같은 원문입니다.** MediaWiki 자형 변환을 쓰므로 URL 접두어(`/zh-hant/`,
+`/zh-hans/`)만 다르고 장·절 구조가 완전히 동일합니다.
+
+이 소스만의 처리:
+
+- **페이지가 책 단위입니다.** jpn.bible 과 같은 책 페이지 캐시를 씁니다. 역본당 요청 66회.
+- **한 문단에 절 마커가 여럿이면 병합 절입니다**(69건). 범위의 모든 번호에 같은 본문을 넣습니다.
+- **장 제목이 한자 숫자입니다.** 표기가 불규칙해(110=一百一十, 111=一百十一) 읽기만 하고,
+  URL 프래그먼트는 아라비아 숫자를 씁니다.
+- **숫자가 아닌 `sup`은 상호참조 마커**(蘇州숫자)입니다. 절 번호가 아닙니다.
+- **시편 표제는 저장하지 않습니다**(116편). 다른 역본과 같은 처리이며, 이 소스는 표제를
+  `<small>`로 감싸 두어 분리가 가능합니다.
+- **敬空(神 앞 전각 공백)은 사라집니다.** 3,557절에 있었고 낱말은 그대로입니다.
+
+적재 결과는 역본당 66권 / 1,189장 / **31,102절**입니다. KJV 총계와 같지만 장별로는 4개 장이
+다릅니다(대상 21·22, 요 7, 요삼 1) — 절 구분 차이이고 본문 소실이 아닙니다.
+
+> eBible.org 의 `cmn-cu89s`/`cmn-cu89t` 는 1919년판이 아니라 **1988년 新標點和合本**입니다.
+> 편의는 크지만 판본과 권리 관계가 달라 채택하지 않았습니다(설계 문서 1.3).
 
 ## 네트워크와 재시도
 
