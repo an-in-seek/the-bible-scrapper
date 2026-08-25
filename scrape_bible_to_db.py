@@ -24,6 +24,8 @@ ENTRY_URL_ENV_BY_TRANSLATION_TYPE = {
     "SBLM": "SBLM_ENTRY_URL",
     "JPNMEB": "JPNMEB_ENTRY_URL",
     "KOUGO": "KOUGO_ENTRY_URL",
+    "CUVT": "CUVT_ENTRY_URL",
+    "CUVS": "CUVS_ENTRY_URL",
 }
 # A language code alone does not identify a source: 'en' covers KJV, WEB and ASV.
 TRANSLATION_TYPES_BY_LANGUAGE_CODE = {
@@ -31,11 +33,12 @@ TRANSLATION_TYPES_BY_LANGUAGE_CODE = {
     "en": ("KJV", "WEB", "ASV"),
     "es": ("RVR1909", "SBLM"),
     "ja": ("JPNMEB", "KOUGO"),
+    "zh": ("CUVT", "CUVS"),
 }
 LEGACY_TRANSLATION_TYPE_BY_ID = {"2": "NKRV"}
 # Tie-break when nothing else narrows it down; keeps the pre-WEB default.
 ENTRY_URL_PREFERENCE_ORDER = (
-    "NKRV", "KJV", "WEB", "ASV", "RVR1909", "SBLM", "JPNMEB", "KOUGO",
+    "NKRV", "KJV", "WEB", "ASV", "RVR1909", "SBLM", "JPNMEB", "KOUGO", "CUVT", "CUVS",
 )
 # Which source may legitimately produce each translation, and how to recognise the
 # translation when bible_translation.translation_type is empty. Drives the
@@ -91,6 +94,20 @@ TRANSLATION_SOURCE_REQUIREMENTS = {
         "version": "kougo",
         "name": "口語訳聖書",
         "language_code": "ja",
+    },
+    "CUVT": {
+        # zh.wikisource puts the script variant in the path (/zh-hant/, /zh-hans/), so
+        # the version token is that segment - the two translations are one source.
+        "source": "wikisource",
+        "version": "zh-hant",
+        "name": "聖經和合本",
+        "language_code": "zh",
+    },
+    "CUVS": {
+        "source": "wikisource",
+        "version": "zh-hans",
+        "name": "圣经和合本",
+        "language_code": "zh",
     },
 }
 

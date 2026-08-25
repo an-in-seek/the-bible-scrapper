@@ -1231,3 +1231,172 @@ def test_jpnbible_refetches_the_book_after_a_failed_request() -> None:
 
     assert [verse.verse_number for verse in payload.verses] == [1, 2]
     assert attempts == ["https://jpn.bible/kougo/gen", "https://jpn.bible/kougo/gen"]
+
+
+WIKISOURCE_ENTRY_URL = (
+    "https://zh.wikisource.org/zh-hant/%E8%81%96%E7%B6%93_(%E5%92%8C%E5%90%88%E6%9C%AC)"
+    "/%E5%89%B5%E4%B8%96%E8%A8%98#1"
+)
+# One chapter as _split_wikisource_book slices it: the heading travels with the slice,
+# verse numbers sit in <sup> inside a span whose id is "chapter:verse".
+WIKISOURCE_CHAPTER_HTML = """
+<h2 id="第一章">第一章</h2>
+<p><span id="1:1" style="color:#ff0000;"><sup>1</sup></span>起初　神創造天地。</p>
+<p><span id="1:2" style="color:#ff0000;"><sup>2</sup></span>地是空虛混沌．淵面黑暗。</p>
+"""
+
+
+def _wikisource_scraper() -> HolyBibleScraper:
+    return HolyBibleScraper(entry_url=WIKISOURCE_ENTRY_URL)
+
+
+def test_wikisource_source_is_recognised() -> None:
+    scraper = _wikisource_scraper()
+
+    assert scraper.get_source_name() == "wikisource"
+    # The script variant is the version token; without it the two Chinese translations
+    # would be indistinguishable to the source/translation check.
+    assert scraper.get_source_version() == "zh-hant"
+    assert scraper.sleep_min >= 1.0
+
+
+def test_wikisource_reads_chinese_numerals() -> None:
+    read = HolyBibleScraper._parse_chinese_numeral
+
+    assert read("三") == 3
+    assert read("十九") == 19
+    assert read("二十一") == 21
+    # 零 must not be dropped: 第一百零一篇 would collide with 第一百篇 and overwrite it.
+    assert read("一百零一") == 101
+    assert read("一百五十") == 150
+    # The source writes the tens digit above one hundred inconsistently.
+    assert read("一百一十") == 110
+    assert read("一百十一") == 111
+
+
+def test_wikisource_splits_book_page_by_chapter_heading() -> None:
+    html = """
+    <div class="mw-parser-output">
+      <h2 id="第一篇">第一篇</h2>
+      <p><span id="1:1"><sup>1</sup></span>第一篇の一節</p>
+      <h2 id="詩篇卷二">詩篇卷二</h2>
+      <p><span id="1:2"><sup>2</sup></span>卷 제목 뒤 문단은 앞 장에 남는다</p>
+      <h2 id="第二篇">第二篇</h2>
+      <p><span id="2:1"><sup>1</sup></span>第二篇の一節</p>
+    </div>
+    """
+    chapters = HolyBibleScraper._split_wikisource_book(html)
+
+    # 詩篇卷N is a section title, not a chapter.
+    assert sorted(chapters) == ["1", "2"]
+    assert "第一篇の一節" in chapters["1"]
+    assert "앞 장에 남는다" in chapters["1"]
+    assert "第二篇の一節" in chapters["2"]
+
+
+def test_wikisource_parses_verses() -> None:
+    verses = _wikisource_scraper().parse_verses_from_html(WIKISOURCE_CHAPTER_HTML)
+
+    assert [verse.verse_number for verse in verses] == [1, 2]
+    # 敬空 (U+3000 before the divine name) is folded away like any other separator.
+    assert verses[0].text == "起初神創造天地。"
+    assert not verses[0].text.startswith("1")
+    assert all("第一章" not in verse.text for verse in verses)
+
+
+def test_wikisource_merged_markers_cover_the_whole_range() -> None:
+    html = """
+    <h2 id="第二十四章">第二十四章</h2>
+    <p><span id="24:29"><sup>29</sup></span><sup>30</sup>利百加有一個哥哥。</p>
+    <p><span id="24:31"><sup>31</sup></span>便對他說。</p>
+    """
+    verses = _wikisource_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [29, 30, 31]
+    assert verses[0].text == verses[1].text
+    assert verses[2].text.startswith("便對他說")
+
+
+def test_wikisource_ignores_crossref_markers() -> None:
+    # Cross-reference markers are Suzhou numerals; reading them as verse numbers would
+    # cut the verse in half, and their text must never reach the body.
+    html = """
+    <h2 id="第一章">第一章</h2>
+    <p><span id="1:23"><sup>23</sup></span>說、『<sup><a href="#1a">〡</a></sup>必有童女、懷孕生子。』</p>
+    <dl><dd><span id="1a"></span><sup>〡</sup><a href="/wiki/x">賽七 〡〤</a></dd></dl>
+    """
+    verses = _wikisource_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [23]
+    assert verses[0].text == "說、『必有童女、懷孕生子。』"
+    assert "賽七" not in verses[0].text
+
+
+def test_wikisource_drops_psalm_superscription() -> None:
+    html = """
+    <h2 id="第二十三篇">第二十三篇</h2>
+    <p><span id="23:1"><sup>1</sup></span><small>大衞的詩。</small>耶和華是我的牧者。</p>
+    """
+    verses = _wikisource_scraper().parse_verses_from_html(html)
+
+    # Every other translation here drops superscriptions; this source marks them, so it
+    # can follow the convention.
+    assert verses[0].text == "耶和華是我的牧者。"
+
+
+def test_wikisource_keeps_a_note_at_the_start_of_a_verse() -> None:
+    # Same markup, different meaning: outside Psalms (章, not 篇) a leading <small> is a
+    # translator's note. Genesis 4:1 opens with one.
+    html = """
+    <h2 id="第四章">第四章</h2>
+    <p><span id="4:1"><sup>1</sup></span><small>〈就是得的意思〉</small>便說、耶和華使我得了一個男子。</p>
+    """
+    verses = _wikisource_scraper().parse_verses_from_html(html)
+
+    assert verses[0].text.startswith("〈就是得的意思〉")
+
+
+def test_wikisource_keeps_a_bracketed_note_inside_a_psalm() -> None:
+    html = """
+    <h2 id="第十篇">第十篇</h2>
+    <p><span id="10:1"><sup>1</sup></span><small>〈或作登堦〉</small>耶和華阿、你為甚麼站在遠處。</p>
+    """
+    verses = _wikisource_scraper().parse_verses_from_html(html)
+
+    assert verses[0].text.startswith("〈或作登堦〉")
+
+
+def test_wikisource_ignores_the_licence_paragraph() -> None:
+    # The licence box sits after the last verse of every book. Accumulating past the
+    # paragraph would append it to that book's final verse in all 66 books.
+    html = """
+    <h2 id="第五十章">第五十章</h2>
+    <p><span id="50:26"><sup>26</sup></span>約瑟死了、正一百一十歲。</p>
+    <p>此作品在全世界都屬於公有領域，因為作者逝世已經超過100年。</p>
+    """
+    verses = _wikisource_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [26]
+    assert "公有領域" not in verses[0].text
+
+
+def test_wikisource_parser_returns_empty_for_other_sources() -> None:
+    scraper = _wikisource_scraper()
+
+    for html in (
+        "<div class='bible_read'><p>1 text</p></div>",
+        "<div class='main'><div class='p'><span class='verse' id='V1'>1 </span>texto</div></div>",
+        "<div id='1'><p><span class='verse' id='1:1'><span class='verse-content'>本文</span></span></p></div>",
+    ):
+        assert scraper._extract_verses_from_wikisource_page(BeautifulSoup(html, "html.parser")) == []
+
+
+def test_wikisource_chapter_urls_use_an_arabic_fragment() -> None:
+    scraper = _wikisource_scraper()
+    url = scraper._build_chapter_url(19, 119)
+
+    # The heading numerals are irregular, so the fragment is the arabic number and is
+    # only a cache key - _split_wikisource_book keys chapters the same way.
+    assert url.endswith("#119")
+    assert "zh-hant" in url
+    assert len(scraper.discover_chapter_urls_for_book(19)) == 150

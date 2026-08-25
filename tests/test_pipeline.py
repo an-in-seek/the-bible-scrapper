@@ -70,6 +70,8 @@ class FakeScraper:
     _get_ebible_translation_code = HolyBibleScraper._get_ebible_translation_code
     _is_jpnbible_source = HolyBibleScraper._is_jpnbible_source
     _get_jpnbible_translation_code = HolyBibleScraper._get_jpnbible_translation_code
+    _is_wikisource_source = HolyBibleScraper._is_wikisource_source
+    _get_wikisource_variant = HolyBibleScraper._get_wikisource_variant
 
     def __init__(self, entry_url: str) -> None:
         self.entry_url = entry_url
