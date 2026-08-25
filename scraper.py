@@ -185,7 +185,7 @@ WIKISOURCE_REMOVABLE_SELECTOR = "span.mw-editsection, table, style, sup.referenc
 # a leading <small> is a translator's note (창 4:1 〈就是得的意思〉), which is kept.
 WIKISOURCE_PSALM_BOOK_ORDER = 19
 WIKISOURCE_NOTE_OPENING_BRACKET = "〈"
-WIKISOURCE_VERSE_ID_PATTERN = re.compile(r"^\d{1,3}:\d{1,3}$")
+WIKISOURCE_VERSE_ID_PATTERN = re.compile(r"^(\d{1,3}):\d{1,3}$")
 WIKISOURCE_MIN_DELAY_SECONDS = 1.0
 # Japanese and Chinese put no spaces between words, so the separator that joins a verse
 # split across blocks - required for Spanish and English - corrupts CJK text instead.
@@ -1190,11 +1190,22 @@ class HolyBibleScraper:
         end of every book is a paragraph without any marker, and accumulating past the
         paragraph would append it to that book's last verse.
         """
-        verse_spans = [
-            span for span in soup.select("span[id]")
-            if WIKISOURCE_VERSE_ID_PATTERN.match(span.get("id") or "") and span.find("sup")
-        ]
-        if not verse_spans:
+        chapters_seen = set()
+        for span in soup.select("span[id]"):
+            match = WIKISOURCE_VERSE_ID_PATTERN.match(span.get("id") or "")
+            if match is not None and span.find("sup"):
+                chapters_seen.add(match.group(1))
+        if not chapters_seen:
+            return []
+        # A whole book page would otherwise come back as one plausible, contiguous verse
+        # list: every chapter's verse 1 collides and _sanitize_verses keeps the first.
+        # The only way here is a broken _split_wikisource_book, so say so loudly.
+        if len(chapters_seen) > 1:
+            logger.warning(
+                "wikisource page carries %d chapters (%s...); expected a single chapter slice",
+                len(chapters_seen),
+                sorted(chapters_seen, key=int)[:5],
+            )
             return []
 
         working = BeautifulSoup(str(soup), "html.parser")

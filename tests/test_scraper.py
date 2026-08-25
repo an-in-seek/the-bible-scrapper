@@ -1400,3 +1400,18 @@ def test_wikisource_chapter_urls_use_an_arabic_fragment() -> None:
     assert url.endswith("#119")
     assert "zh-hant" in url
     assert len(scraper.discover_chapter_urls_for_book(19)) == 150
+
+
+def test_wikisource_rejects_a_multi_chapter_page() -> None:
+    # _fetch_soup always slices one chapter out of the book page. Handed the whole book,
+    # the accumulator would return a plausible contiguous list built from every
+    # chapter's opening verses - the same trap the jpn.bible parser guards against.
+    html = """
+    <h2 id="第一章">第一章</h2>
+    <p><span id="1:1"><sup>1</sup></span>第一章の一節</p>
+    <h2 id="第二章">第二章</h2>
+    <p><span id="2:1"><sup>1</sup></span>第二章の一節</p>
+    """
+    scraper = _wikisource_scraper()
+
+    assert scraper._extract_verses_from_wikisource_page(BeautifulSoup(html, "html.parser")) == []
