@@ -13,7 +13,7 @@ from typing import Iterable
 from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlparse, urlunparse
 
 import requests
-from bs4 import BeautifulSoup, NavigableString, Tag
+from bs4 import BeautifulSoup, NavigableString, PageElement, Tag
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_random_exponential
 
 from models import ChapterPayload, Verse
@@ -95,6 +95,7 @@ BIBLEGATEWAY_OMITTED_VERSE_TEXT = OMITTED_VERSE_TEXT
 DEFAULT_EBIBLE_RV1909_ENTRY_URL = "https://ebible.org/spaRV1909/GEN01.htm"
 DEFAULT_EBIBLE_SBLM_ENTRY_URL = "https://ebible.org/spablm/GEN01.htm"
 DEFAULT_EBIBLE_JPNMEB_ENTRY_URL = "https://ebible.org/jpnm/GEN01.htm"
+DEFAULT_EBIBLE_LSG1910_ENTRY_URL = "https://ebible.org/fraLSG/GEN01.htm"
 DEFAULT_EBIBLE_TRANSLATION_CODE = "spaRV1909"
 # Verse markers are `<span class="verse" id="V12">`; the chapter label uses V0.
 EBIBLE_VERSE_ID_PATTERN = re.compile(r"^V(\d{1,3})$")
@@ -103,7 +104,9 @@ EBIBLE_VERSE_ID_PATTERN = re.compile(r"^V(\d{1,3})$")
 # RV1909 but are emitted by the same renderer for other translations.
 EBIBLE_REMOVABLE_SELECTOR = (
     "ul.tnav, div.mt, div.mt1, div.mt2, div.mt3, "
-    "div.ms, div.ms1, div.s, div.s1, div.s2, div.sr, div.mr, div.r, "
+    # fraLSG puts a second-level major heading between Genesis 11:9 and 11:10; without
+    # div.ms2 it lands on 11:9 as "… toute la terre. DEPUIS ABRAHAM JUSQU’À JOSEPH".
+    "div.ms, div.ms1, div.ms2, div.ms3, div.s, div.s1, div.s2, div.sr, div.mr, div.r, "
     # Headings that appear BETWEEN verses: a psalm/acrostic title (div.d, div.qa) or a
     # speaker label (div.sp). They carry no verse marker, so the accumulator folds them
     # into the surrounding verse (spablm Psalms 119 leaks 21, Song of Songs 1 leaks 8).
@@ -1627,8 +1630,19 @@ class HolyBibleScraper:
 
         # Detect before stripping footnotes: the evidence disappears with the marker.
         omitted = self._collect_ebible_omitted_verses(working)
-        for removable in working.select(EBIBLE_FOOTNOTE_SELECTOR):
-            removable.decompose()
+        for marker in working.select(EBIBLE_FOOTNOTE_SELECTOR):
+            if marker.decomposed:  # went with an enclosing marker
+                continue
+            before = self._ebible_text_beside_note(marker.previous_elements)
+            after = self._ebible_text_beside_note(marker.next_elements)
+            marker.decompose()
+            # fraLSG sets some markers between two words with no space ("et<note>on"): the
+            # superscript is the only visible separator, so deleting it glues the words
+            # (189 places, mostly span.wj edges in the Gospels). The space goes onto the
+            # next text node, not in place of the marker - the accumulator below skips
+            # whitespace-only nodes. Letters on both sides only, so "mot<note>." stays.
+            if before is not None and after is not None and before[-1].isalpha() and after[0].isalpha():
+                after.replace_with(" " + after)
 
         chunks: dict[int, list[str]] = {}
         current: int | None = None
@@ -1671,6 +1685,19 @@ class HolyBibleScraper:
             if text:
                 verses.append(Verse(verse_number=verse_number, text=text))
         return verses
+
+    @staticmethod
+    def _ebible_text_beside_note(elements: Iterable[PageElement]) -> NavigableString | None:
+        """First non-empty text in `elements` that no footnote marker contains."""
+        for element in elements:
+            if not isinstance(element, NavigableString) or not element:
+                continue
+            # Skips the marker's own popup (next_elements walks into it first) and the
+            # popup of an adjacent marker.
+            if any(parent.css.match(EBIBLE_FOOTNOTE_SELECTOR) for parent in element.parents):
+                continue
+            return element
+        return None
 
     @staticmethod
     def _collect_ebible_omitted_verses(working: BeautifulSoup) -> set[int]:

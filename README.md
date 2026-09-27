@@ -2,7 +2,7 @@
 
 성경 본문을 스크래핑해 PostgreSQL의 `bible_chapter`, `bible_verse`에 적재하는 도구입니다.
 
-현재 기준으로 안정적으로 맞춰진 소스는 아래 11개입니다.
+현재 기준으로 안정적으로 맞춰진 소스는 아래 12개입니다.
 
 - `thekingsbible.com` KJV
 - `bskorea.or.kr` NKRV(`version=GAE`)
@@ -15,6 +15,7 @@
 - `zh.wikisource.org` CUVT(`zh-hant`, 聖經和合本 1919 — 중국어 번체)
 - `zh.wikisource.org` CUVS(`zh-hans`, 圣经和合本 1919 — 중국어 간체)
 - `studybible.info` N1904(`Nestle`, Nestle 1904 그리스어 신약 — 신약 27권만)
+- `ebible.org` LSG1910(`fraLSG`, Louis Segond 1910 — 프랑스어, LSG 고유 절 체계)
 
 설계 문서:
 
@@ -27,7 +28,7 @@
 - KOUGO: [docs/japanese-colloquial-1955-scraping-design.md](docs/japanese-colloquial-1955-scraping-design.md)
 - CUVT/CUVS: [docs/chinese-union-version-1919-scraping-design.md](docs/chinese-union-version-1919-scraping-design.md)
 - N1904: [docs/greek-new-testament-nestle-1904-scraping-design.md](docs/greek-new-testament-nestle-1904-scraping-design.md)
-- 프랑스어(LSG 1910 · Ostervald · Martin, 미구현): [docs/french-public-domain-scraping-design.md](docs/french-public-domain-scraping-design.md)
+- LSG1910(프랑스어; Ostervald · Martin은 보류): [docs/french-public-domain-scraping-design.md](docs/french-public-domain-scraping-design.md)
 
 ## 주요 특징
 
@@ -61,7 +62,7 @@
 - `docs/japanese-colloquial-1955-scraping-design.md`: KOUGO(일본어 口語訳 1954/1955) 설계 문서
 - `docs/chinese-union-version-1919-scraping-design.md`: CUVT/CUVS(중국어 和合本 1919) 설계 문서
 - `docs/greek-new-testament-nestle-1904-scraping-design.md`: N1904(그리스어 신약 Nestle 1904) 설계 문서. Rahlfs LXX 1935 불채택 근거 포함
-- `docs/french-public-domain-scraping-design.md`: 프랑스어 역본 설계 문서 (미구현). LSG 1910은 절 체계 결정 대기, Ostervald·Martin은 보류
+- `docs/french-public-domain-scraping-design.md`: LSG1910(프랑스어 Louis Segond 1910) 설계 문서. Ostervald·Martin 보류 근거 포함
 
 ## 요구 사항
 
@@ -113,13 +114,14 @@ SBLM_ENTRY_URL=https://ebible.org/spablm/GEN01.htm
 JPNMEB_ENTRY_URL=https://ebible.org/jpnm/GEN01.htm
 KOUGO_ENTRY_URL=https://jpn.bible/kougo/gen#1
 N1904_ENTRY_URL=https://studybible.info/Nestle/Matthew%201
+LSG1910_ENTRY_URL=https://ebible.org/fraLSG/GEN01.htm
 CUVT_ENTRY_URL=https://zh.wikisource.org/zh-hant/%E8%81%96%E7%B6%93_(%E5%92%8C%E5%90%88%E6%9C%AC)/%E5%89%B5%E4%B8%96%E8%A8%98#1
 CUVS_ENTRY_URL=https://zh.wikisource.org/zh-hans/%E8%81%96%E7%B6%93_(%E5%92%8C%E5%90%88%E6%9C%AC)/%E5%89%B5%E4%B8%96%E8%A8%98#1
 ```
 
 `--entry-url`를 지정하지 않으면 기본 URL은 아래 순서로 결정됩니다.
 
-1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JPNMEB` / `KOUGO` / `CUVT` / `CUVS` / `N1904`)에 해당하는 환경변수
+1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JPNMEB` / `KOUGO` / `CUVT` / `CUVS` / `N1904` / `LSG1910`)에 해당하는 환경변수
 2. `BIBLE_TRANSLATION_ID=2` 또는 `BIBLE_TRANSLATION_NAME=개역개정`이면 `NKRV_ENTRY_URL`
 3. `BIBLE_LANGUAGE_CODE`로 좁혀지는 소스가 하나면 그 값
    - `ko` -> `NKRV_ENTRY_URL`
@@ -128,8 +130,9 @@ CUVS_ENTRY_URL=https://zh.wikisource.org/zh-hans/%E8%81%96%E7%B6%93_(%E5%92%8C%E
    - `ja` -> `JPNMEB_ENTRY_URL` / `KOUGO_ENTRY_URL` 중 설정된 것
    - `zh` -> `CUVT_ENTRY_URL` / `CUVS_ENTRY_URL` 중 설정된 것
    - `el` -> `N1904_ENTRY_URL` (본문은 코이네 그리스어지만 DB의 `language_code` CHECK가 `grc`가 아닌 `el`을 허용하므로 `el`로 등록되어 있습니다)
+   - `fr` -> `LSG1910_ENTRY_URL`
 4. 설정된 엔트리 URL이 하나뿐이면 그 값
-5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JPNMEB` -> `KOUGO` -> `CUVT` -> `CUVS` -> `N1904` 순으로 선택
+5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JPNMEB` -> `KOUGO` -> `CUVT` -> `CUVS` -> `N1904` -> `LSG1910` 순으로 선택
 6. 아무것도 없으면 내장 기본값 `https://thekingsbible.com/Bible/1/1` 사용
 
 주의: `BIBLE_LANGUAGE_CODE`만으로는 소스가 특정되지 않습니다.  
@@ -453,6 +456,46 @@ N1904_ENTRY_URL=https://studybible.info/Nestle/Matthew%201
 > eBible.org 의 `grcbyz`는 제목이 `1904 Patriarchal Greek New Testament`라 연도가 같지만
 > **1904년 콘스탄티노폴리스 총대주교청판**으로 계보가 다릅니다. 기존 eBible 어댑터로 바로
 > 적재되기까지 해서 더 헷갈리기 쉽습니다(설계 문서 10.1).
+
+### 11. LSG1910 `ebible.org`
+
+Louis Segond 1910. 프랑스어 개신교 표준 역본의 1910년 개정판입니다. 프랑스어 위키백과와 eBible이
+퍼블릭 도메인으로 표기하고, 1931년 이전 발행이라 미국에서도 보호 대상이 아닙니다. 흔히 함께
+언급되는 1978년판(Colombe)과 2002년판(NBS)은 저작권이 있는 다른 판입니다. 근거는
+[설계 문서](docs/french-public-domain-scraping-design.md) 1장에 있습니다.
+
+```env
+LSG1910_ENTRY_URL=https://ebible.org/fraLSG/GEN01.htm
+```
+
+RVR1909·SBLM·JPNMEB와 같은 eBible 렌더러이며 역본 코드만 다릅니다.
+
+**절 번호가 KJV 체계가 아닙니다.** LSG 1910이 원래 쓰는 체계(히브리어 성경의 장·절 구분)를
+그대로 싣기 때문에 **106개 장에서 KJV와 절 수가 다릅니다.** 다른 역본은 모두 사실상 KJV
+체계라서, `(책, 장, 절)`로 역본을 나란히 놓으면 이 장들에서 한두 절씩 어긋납니다.
+
+- 긴 시편 표제가 **1절**입니다(62편). 시 3:1은 `Psaume de David. …`이고 KJV 3:1의 내용은 3:2입니다.
+  시 51·52·54·60편은 표제가 두 절입니다.
+- 20권 44개 장에서 장 경계나 절 나눔이 다릅니다(출 7–8, 욥 38–41, 욘 1–2, 막 9–10 등).
+  KJV 출 8:1은 LSG 7:26, 욘 1:17은 LSG 2:1입니다.
+- 이 표제는 번호가 붙은 정식 절이므로 **저장합니다.** 다른 역본이 버리는 표제(번호 없는
+  `div.d`)와 다릅니다.
+
+이 소스 때문에 eBible 파서에 들어간 처리:
+
+- **2단계 주 소제목(`div.ms2`)을 제거합니다.** 창 11:9와 10절 사이에 있어, 빼지 않으면
+  9절 끝에 `DEPUIS ABRAHAM JUSQU’À JOSEPH`가 붙습니다.
+- **각주 마커 양쪽이 모두 글자이면 공백 하나를 남깁니다.** 원문이 두 낱말 사이에 공백 없이
+  마커를 넣은 곳이 189곳이라(마 5:15 `et` + 마커 + `on` 등), 마커를 지우기만 하면 `eton`이
+  됩니다. 구두점이나 아포스트로피 옆의 마커는 그대로 지웁니다.
+- 각 책 1장 앞의 현대 해설(소개문)은 첫 절 마커 앞에 있어 저장되지 않습니다.
+- 상호참조 각주(9,751개)와 소제목·평행 본문 참조는 저장하지 않습니다. `— Pause.`(셀라)는 본문으로 남습니다.
+
+적재 결과는 66권 / 1,189장 / **31,170절**(구약 23,211 / 신약 7,959)이며, eBible이 밝힌 절 수와 같습니다.
+아포스트로피는 원문대로 `’`(U+2019)이므로 검색할 때 ASCII `'`와 구별됩니다.
+
+> Ostervald와 Martin은 보류했습니다. eBible의 Ostervald는 1744년판이 아니라 1996년 개정판이고,
+> studybible의 Martin은 다른 절 체계의 본문을 KJV 틀에 번호만 맞춰 넣어 92개 장이 어긋나 있습니다(설계 문서 10장).
 
 ## 네트워크와 재시도
 

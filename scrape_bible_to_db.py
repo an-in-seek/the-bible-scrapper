@@ -27,6 +27,7 @@ ENTRY_URL_ENV_BY_TRANSLATION_TYPE = {
     "CUVT": "CUVT_ENTRY_URL",
     "CUVS": "CUVS_ENTRY_URL",
     "N1904": "N1904_ENTRY_URL",
+    "LSG1910": "LSG1910_ENTRY_URL",
 }
 # A language code alone does not identify a source: 'en' covers KJV, WEB and ASV.
 TRANSLATION_TYPES_BY_LANGUAGE_CODE = {
@@ -38,12 +39,13 @@ TRANSLATION_TYPES_BY_LANGUAGE_CODE = {
     # The text is Koine, but bible_translation stores 'el': the DB's language_code CHECK
     # admits 'el' and not 'grc'. A Modern Greek translation added later would share it.
     "el": ("N1904",),
+    "fr": ("LSG1910",),
 }
 LEGACY_TRANSLATION_TYPE_BY_ID = {"2": "NKRV"}
 # Tie-break when nothing else narrows it down; keeps the pre-WEB default.
 ENTRY_URL_PREFERENCE_ORDER = (
     "NKRV", "KJV", "WEB", "ASV", "RVR1909", "SBLM", "JPNMEB", "KOUGO", "CUVT", "CUVS",
-    "N1904",
+    "N1904", "LSG1910",
 )
 # Which source may legitimately produce each translation, and how to recognise the
 # translation when bible_translation.translation_type is empty. Drives the
@@ -124,6 +126,14 @@ TRANSLATION_SOURCE_REQUIREMENTS = {
         # recovers the translation from (name, language_code).
         "name": "Η Καινή Διαθήκη (Nestle 1904)",
         "language_code": "el",
+    },
+    "LSG1910": {
+        # The fourth eBible translation: without `version` the four would pass as each
+        # other. Its verse numbering is the edition's own (Hebrew-style), not KJV's.
+        "source": "ebible",
+        "version": "fraLSG",
+        "name": "Louis Segond 1910",
+        "language_code": "fr",
     },
 }
 

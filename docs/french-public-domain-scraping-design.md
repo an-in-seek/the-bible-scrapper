@@ -127,7 +127,7 @@ eBible에는 Martin이 **없다**(`translations.csv` 1,551행 중 `fra` 5행: `f
 2. **LSG 1910 — 적재할 수 있다. eBible `fraLSG`(A)를 권고하되, 절 체계 결정이 먼저다.** 같은 1910년 본문이 두 소스에 있고, 두 소스를 전권 낱말 대조했다(779,734낱말, 차이 290곳).
    - **A는 LSG 원래의 절 체계**다. 히브리어 성경처럼 긴 시편 표제를 1절로 세고(62편), 출 7–8장·레 5–6장·욥 38–41장 등 44개 장에서 장 경계가 다르다. **KJV와 절 수가 다른 장이 106개**로, 이미 적재된 11개 역본의 최대치(RVR1909, 12개)의 약 9배다([4.5](#45-함정-3-절-체계가-kjv와-106개-장에서-다르다)).
    - **B(studybible)는 같은 본문을 KJV 절 체계로 다시 나눈 것**이지만 소스 쪽 결함을 고칠 수 없다 — 절 첫머리의 악센트 글자 61곳이 사라졌고(`à la chaîne`→`la chaîne`, `Écoute`→`coute`), 장 끝 두 곳에 책 이름이 붙었고(`… hors de son pays. Exode`), 대문자 악센트·여는 괄호·대괄호가 전부 없다([4.10](#410-b안--같은-본문의-kjv-절-체계판-그러나-소스-결함이-있다)).
-   - **기준 충돌을 먼저 밝힌다.** 그리스어 구약 때 정한 "구조가 어긋나면 중단"([N1904 설계 13](greek-new-testament-nestle-1904-scraping-design.md#13-결론))을 그대로 적용하면 A는 중단 대상이다. 이 문서는 A를 권고하지만 **이 결정은 사용자 몫이다**([4.11](#411-절-체계-결정)).
+   - **기준 충돌을 먼저 밝힌다.** 그리스어 구약 때 정한 "구조가 어긋나면 중단"([N1904 설계 13](greek-new-testament-nestle-1904-scraping-design.md#13-결론))을 그대로 적용하면 A는 중단 대상이다. 이 문서는 A를 권고하지만 **이 결정은 사용자 몫이다**([4.11](#411-절-체계-결정)). → **A로 결정되어 구현·적재했다**([14장](#14-구현적재-결과-실측)).
 3. **A는 파서를 두 곳 고쳐야 한다.** 둘 다 모든 자동 검사(절 수·연속성·숫자·빈 절)를 통과하는 오염이다.
    - 소제목 `div.ms2`가 제거 셀렉터에 없어 **창 11:9 끝에 `DEPUIS ABRAHAM JUSQU’À JOSEPH`가 붙는다**([4.3](#43-함정-1-소제목-하나가-창-119에-붙는다)).
    - 각주 마커가 두 낱말 사이의 **유일한 경계**인 곳이 189곳이라, 마커를 지우면 `et on`이 `eton`으로 붙는다(마 5:15 등, 복음서·계시록에 몰림)([4.4](#44-함정-2-각주-마커가-유일한-낱말-경계인-곳이-189곳)).
@@ -166,7 +166,7 @@ eBible에는 Martin이 **없다**(`translations.csv` 1,551행 중 `fra` 5행: `f
 2. **1996년 Ostervald의 개정자와 권리 상태를 찾지 못했다.** 찾지 못했다는 것이 권리가 없다는 뜻은 아니다.
 3. **Ostervald 1877년판은 표본만 봤다.** 권리와 출처 문제가 먼저라 전권을 수집하지 않았다.
 4. **Martin의 다른 소스를 전부 조사하지는 않았다.** 원 절 체계를 그대로 싣는 곳(lueur.org)은 AI 크롤러를 막고 있어 제외했고, 나머지는 [10.2](#102-martin--보류)에 적었다.
-5. **각주 마커 수정이 기존 역본에 주는 영향은 표본으로만 봤다.** SBLM 20장(각주 63개)에서 해당 위치가 0건이었다. 수정 후 [7.8](#78-기존-역본-회귀-검증)의 전권 확인이 필요하다.
+5. **각주 마커 수정이 기존 역본에 주는 영향은 표본으로만 봤다.** SBLM 20장(각주 63개)에서 해당 위치가 0건이었다. 수정 후 [7.8](#78-기존-역본-회귀-검증)의 전권 확인이 필요하다. → 전권 확인에서 SBLM 1곳(눅 4:18)이 나왔다([14.3](#143-기존-역본-회귀)).
 6. **법적 판단은 하지 않았다.** [1.1](#11-제시된-근거-검토)·[1.2](#12-판본-계보--무엇이-퍼블릭-도메인인가)는 각 출처의 표기를 옮긴 것이다.
 
 ---
@@ -240,7 +240,7 @@ LSG는 각주 마커를 낱말 **사이**에 공백 없이 끼운 곳이 있다.
 
 9,751개 마커의 앞뒤 글자를 전수 조사하니 **양쪽이 모두 문자인 곳이 189곳**이다 — 마 62, 요 44, 눅 40, 계 25, 막 14, 스 3, 행 1. 예수의 말씀(`span.wj`)과 이탤릭(`span.it`)이 마커를 사이에 두고 끊긴 자리다. 숫자·연속성 검사는 물론 [7.3](#73-오염-검증--이-소스-필수)의 대문자 검사로도 잡히지 않는다. B와의 전권 대조(4.10)에서 **낱말 경계 차이 191곳**으로 드러났고, 책별 개수까지 위 189곳과 일치한다(나머지 2곳은 창세기의 eBible 원문 하이픈 누락: 12:1 `Vat’en`, 50:10 `audelà`). 막 9:49 `serasalé`(sera salé)도 그중 하나다.
 
-같은 파서를 쓰는 SBLM에서 20장(각주 63개)을 표본 조사하면 이런 위치가 0곳이다. RVR1909에는 각주가 없고, JPNMEB는 공백을 쓰지 않는 문자라 영향이 없다.
+같은 파서를 쓰는 SBLM에서 20장(각주 63개)을 표본 조사하면 이런 위치가 0곳이다. RVR1909에는 각주가 없고, JPNMEB는 공백을 쓰지 않는 문자라 영향이 없다. (수정 후 SBLM 전권을 확인하니 1곳 — 눅 4:18 `corazonesrotos` — 이 있었고, 고쳤다. [14.3](#143-기존-역본-회귀))
 
 ### 4.5 함정 3. 절 체계가 KJV와 106개 장에서 다르다
 
@@ -387,6 +387,8 @@ B의 판본 설명 페이지(`/version/Segond`)는 Martin과 같이 PHP 오류�
 
 서비스가 절 번호로 역본을 나란히 놓는지가 판단 기준이다. **이 결정이 서기 전에는 적재하지 않는다.**
 
+> **결정 (2026-09-27): A.** 사용자가 A(eBible `fraLSG`, LSG 원 절 체계)로 구현하도록 정했다. 구현과 적재 결과는 [14장](#14-구현적재-결과-실측)에 있다.
+
 ---
 
 ## 5. 코드 변경 지점
@@ -405,21 +407,22 @@ EBIBLE_REMOVABLE_SELECTOR = (
 
 `div.ms3`은 관측되지 않았지만 USFM `\ms` 계열의 같은 단계 표지이고, `div.mt1~3`을 이미 같은 방식으로 나열하고 있다. **`div.q`·`div.b`·`div.m`은 넣지 않는다**(본문이다).
 
-**`scraper.py` ② 각주 마커가 낱말 사이에 있으면 공백으로 바꾼다**
+**`scraper.py` ② 각주 마커가 낱말 사이에 있으면 공백 하나를 남긴다**
 
 ```python
-        for removable in working.select(EBIBLE_FOOTNOTE_SELECTOR):
-            # LSG sets some markers between two words with no space ("et<note>on"): the
-            # superscript is the only visible separator, so deleting it glues the words
-            # (189 places, mostly span.wj boundaries in the Gospels). Leave one space only
-            # when letters sit on both sides, so "mot<note>." does not become "mot .".
-            if self._letters_on_both_sides(removable):
-                removable.replace_with(" ")
-            else:
-                removable.decompose()
+        for marker in working.select(EBIBLE_FOOTNOTE_SELECTOR):
+            if marker.decomposed:  # went with an enclosing marker
+                continue
+            before = self._ebible_text_beside_note(marker.previous_elements)
+            after = self._ebible_text_beside_note(marker.next_elements)
+            marker.decompose()
+            if before is not None and after is not None and before[-1].isalpha() and after[0].isalpha():
+                after.replace_with(" " + after)
 ```
 
-`_letters_on_both_sides()`는 마커 **바깥**의 앞 텍스트 마지막 글자와 뒤 텍스트 첫 글자가 모두 `str.isalpha()`인지 본다(마커 안의 팝업 텍스트는 건너뛴다). 한자·가나도 `isalpha()`가 참이지만, 넣은 공백은 뒤이어 `CJK_JOIN_PATTERN`이 지우므로 JPNMEB에는 결과 변화가 없다.
+`_ebible_text_beside_note()`는 마커 **바깥**에서 가장 가까운 비지 않은 텍스트 노드를 돌려준다(자기 팝업과 이웃 마커의 팝업은 건너뛴다). 앞 노드의 마지막 글자와 뒤 노드의 첫 글자가 모두 `str.isalpha()`일 때만 뒤 노드 앞에 공백을 붙인다. 한자·가나도 `isalpha()`가 참이지만, 붙인 공백은 뒤이어 `CJK_JOIN_PATTERN`이 지운다.
+
+> **처음 설계는 동작하지 않았다.** 이 절의 첫 판은 마커를 `replace_with(" ")`로 공백 노드로 바꾸는 것이었다. 그러나 누적 루프가 **공백만 있는 텍스트 노드를 건너뛰므로**(`if not text.strip(): continue`) 넣은 공백이 버려지고 `eton`이 그대로 남는다. 구현 전에 이것을 확인하고 뒤 텍스트 노드에 붙이는 방식으로 바꿨다. 누적 루프의 건너뛰기를 고치는 쪽은 택하지 않았다 — 모든 eBible 역본의 블록 경계 처리를 건드리기 때문이다.
 
 **①②는 이미 적재된 eBible 역본의 결과를 바꿀 수 있는 변경이다.** 이 문서의 조사로는 영향이 0이지만(RVR1909·SBLM에 `div.ms2` 흔적 0, SBLM 표본에 해당 마커 0), 전권 확인을 [7.8](#78-기존-역본-회귀-검증)에 넣었다.
 
@@ -596,7 +599,22 @@ A의 총계는 eBible `translations.csv`가 밝힌 값(`OTverses 23211`, `NTvers
 
 KJV `translation_id`와 장별 절 수를 비교한다.
 
-- **A: 106개 장이 달라야 정상이다.** 시편 62편(+1, 단 51·52·54·60편은 +2)과 20권 44개 장. LSG에만 있는 절 번호 114개, KJV에만 있는 절 번호 46개. 이 목록은 [4.5](#45-함정-3-절-체계가-kjv와-106개-장에서-다르다)의 표와 이 문서 작성 시 추출한 장 목록으로 **고정**하고, 한 장이라도 늘거나 줄면 파싱 이상으로 본다.
+- **A: 106개 장이 달라야 정상이다.** 시편 62편(+1, 단 51·52·54·60편은 +2)과 20권 44개 장. LSG에만 있는 절 번호 114개, KJV에만 있는 절 번호 46개. 아래 목록으로 **고정**하고, 한 장이라도 늘거나 줄면 파싱 이상으로 본다.
+
+  ```text
+  시편 (62)  3 4 5 6 7 8 9 12 18 19 20 21 22 30 31 34 36 38 39 40 41 42 44 45 46 47 48 49
+             51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 67 68 69 70 75 76 77 80 81 83 84
+             85 88 89 92 102 108 140 142
+  그 밖 (44, KJV 절 수 → LSG 절 수)
+    EXO 7 25→29   EXO 8 32→28   LEV 5 19→26   LEV 6 30→23   NUM 29 40→39  NUM 30 16→17
+    1SA 20 42→43  1SA 23 29→28  1SA 24 22→23  1KI 22 53→54  2CH 13 22→23  2CH 14 15→14
+    JOB 34 37→36  JOB 38 41→38  JOB 39 30→38  JOB 40 24→28  JOB 41 34→25
+    ECC 4 16→17   ECC 5 20→19   ECC 11 10→8   ECC 12 14→16  SNG 6 13→12   SNG 7 13→14
+    ISA 8 22→23   ISA 9 21→20   ISA 64 12→11  EZK 20 49→44  EZK 21 32→37
+    HOS 1 11→9    HOS 2 23→25   HOS 11 12→11  HOS 12 14→15  JON 1 17→16   JON 2 10→11
+    MIC 4 13→14   MIC 5 15→14   NAM 1 15→14   NAM 2 13→14   MRK 9 50→51   MRK 10 52→53
+    ACT 19 41→40  2CO 13 14→13  3JN 1 14→15   REV 12 17→18
+  ```
 - **B: 0개 장이 달라야 정상이다.** 원 페이지의 마커부터 1,189장 모두 KJV와 같은 개수다.
 
 ### 7.3 오염 검증 — 이 소스 필수
@@ -643,7 +661,7 @@ FROM bible_verse v JOIN bible_chapter c ON c.id = v.chapter_id JOIN bible_book b
 WHERE b.translation_id = :tid;
 ```
 
-이 질의는 **절 수**를 센다(한 절에 두 번 나오면 1). [1.3](#13-온라인에-실제로-있는-판본)의 846/46은 **출현 횟수**이므로, 절 수 기대값은 적재 후 처음 확정해 기록한다. 판본 판별에 필요한 것은 비율과 `prêtre`의 문맥(전부 이방 제사장)이다.
+이 질의는 **절 수**를 센다(한 절에 두 번 나오면 1). [1.3](#13-온라인에-실제로-있는-판본)의 846/46은 **출현 횟수**이므로, 절 수 기대값은 적재 후 처음 확정해 기록한다. 판본 판별에 필요한 것은 비율과 `prêtre`의 문맥(전부 이방 제사장)이다. → 적재 결과 **766절 / 40절**([14.6](#146-적재와-검증)). 이후 재적재나 drift 점검에서는 이 값이 기대값이다.
 
 눈으로 확인할 절:
 
@@ -681,7 +699,7 @@ A안의 파서 수정 ①②는 eBible 파서 공용 코드다. 이미 적재된
 python scripts/check_translation_drift.py --translation-id 35 --entry-url https://ebible.org/spablm/GEN01.htm
 ```
 
-SBLM(35)은 각주가 있는 역본이라 ②의 영향을 받을 수 있는 유일한 기존 역본이다 — **전권**을 돌린다. RVR1909(33, 각주 없음)와 JPNMEB(36, CJK)는 각각 몇 권으로 충분하다. 기대값은 셋 모두 **차이 0**이다. drift 검사는 소스의 현재 본문과 비교하므로, 소스가 그 사이 바뀌었다면 파서 변경과 무관한 차이가 섞인다 — 수정 **전** 파서로 한 번, **후**로 한 번 돌려 차이가 같은지 보면 가를 수 있다.
+SBLM(35)은 각주가 있는 역본이라 ②의 영향을 받을 수 있는 유일한 기존 역본이다 — **전권**을 돌린다. RVR1909(33, 각주 없음)와 JPNMEB(36, CJK)는 각각 몇 권으로 충분하다. 기대값은 셋 모두 **차이 0**이다(실측은 SBLM 2절 — [14.3](#143-기존-역본-회귀)). drift 검사는 소스의 현재 본문과 비교하므로, 소스가 그 사이 바뀌었다면 파서 변경과 무관한 차이가 섞인다 — 수정 **전** 파서로 한 번, **후**로 한 번 돌려 차이가 같은지 보면 가를 수 있다.
 
 ---
 
@@ -872,3 +890,128 @@ A는 적재 자체가 성공하고 모든 자동 검사를 통과한다. 문제�
 - **Martin**은 보류한다. 기존 어댑터로 읽히는 유일한 소스는 다른 절 체계의 본문을 KJV 틀에 번호만 맞춰 끼워 92개 장이 어긋나 있고, 원 체계의 Martin을 구해도 LSG와 같은 결정이 남는다.
 
 재개하려면 LSG는 [4.11](#411-절-체계-결정)에서 A/B/보류를 정하고, Ostervald와 Martin은 [10장](#10-대안-경로--보류한-두-역본)의 선행 조건 중 하나를 먼저 해결해야 한다.
+
+> **이후 (2026-09-27).** LSG는 A로 결정되어 구현·적재했다([14장](#14-구현적재-결과-실측)). Ostervald와 Martin은 그대로 보류다.
+
+---
+
+## 14. 구현·적재 결과 (실측)
+
+[11장](#11-구현-순서)의 A안 순서대로 구현하고 적재한 결과다(2026-09-27).
+
+### 14.1 구현
+
+| 파일 | 변경 |
+| --- | --- |
+| `scraper.py` | `EBIBLE_REMOVABLE_SELECTOR`에 `div.ms2, div.ms3`. 각주 마커 제거를 [5.1](#51-a안--ebible-fralsg) ②로(`_ebible_text_beside_note()` 추가). `DEFAULT_EBIBLE_LSG1910_ENTRY_URL` |
+| `scrape_bible_to_db.py` | `LSG1910` 등록 — `ENTRY_URL_ENV_BY_TRANSLATION_TYPE`, `"fr": ("LSG1910",)`, 선호 순서 끝, `TRANSLATION_SOURCE_REQUIREMENTS`(`ebible` / `fraLSG` / `Louis Segond 1910` / `fr`) |
+| `tests/test_scraper.py` | [8장](#8-테스트-설계) A안 파서 테스트 6개 |
+| `tests/test_pipeline.py` | 등록 테스트 4개 — `fraLSG`→`LSG1910` 통과, eBible 네 역본 상호 거부 6쌍, `translation_type`이 빈 행의 이름 식별, `BIBLE_LANGUAGE_CODE=fr` 해석 |
+
+`pytest -q` **165개 통과**(기존 155 + 10). 두 수정은 되돌렸을 때 해당 테스트가 실패하는지 확인했다.
+
+| 되돌린 것 | 실패한 테스트 |
+| --- | --- |
+| `div.ms2` 제거 | `test_ebible_drops_a_second_level_major_heading` |
+| 마커 공백 | `test_ebible_keeps_a_space_where_a_note_marker_split_two_words` |
+| 조건 없이 항상 공백 | `test_ebible_adds_no_space_where_a_note_marker_touches_punctuation` ([리스크 4](#리스크-4-각주-마커-수정이-기존-역본을-바꾼다)) |
+
+### 14.2 파서 수정의 효과 — 수집해 둔 1,189장 재파싱
+
+조사 때 받아 둔 fraLSG 1,189장을 네트워크 없이 수정 전·후 파서로 각각 파싱해 비교했다.
+
+- 바뀐 절 **175개**. 그중 174절은 공백 추가뿐이고 합계 **189개** — 책별로 마 62, 요 44, 눅 40, 계 25, 막 14, 스 3, 행 1로 [4.4](#44-함정-2-각주-마커가-유일한-낱말-경계인-곳이-189곳)의 조사와 같다.
+- 나머지 1절은 창 11:9의 소제목 제거다.
+- 그 밖의 절은 한 글자도 바뀌지 않았다. 구두점 앞 공백 증가 0, 이중 공백 0, 숫자 0, 대문자 12자 연속 0.
+
+B(studybible `Segond`)와의 낱말 대조([7.6](#76-제2-증인-대조))를 다시 돌리면 차이가 **290곳 → 100곳**이다. 낱말 경계 차이는 191곳에서 원문 하이픈 2곳(창 12:1, 50:10)만 남았고 소제목 오염은 사라졌다. 남은 100곳은 B의 결함(`à` 53 + 악센트 대문자 8 + 책 이름 2)과 그 밖의 낱말·철자 차이 35곳([4.10](#410-b안--같은-본문의-kjv-절-체계판-그러나-소스-결함이-있다))으로, [7.6](#76-제2-증인-대조)의 예측("약 100곳")과 같다.
+
+### 14.3 기존 역본 회귀
+
+[7.8](#78-기존-역본-회귀-검증)의 확인이다. eBible 페이지를 한 번씩 받아, 수정 전 파서(HEAD)와 수정 후 파서로 각각 파싱해 비교하고(파서 변경의 효과), 수정 후 결과를 DB와 비교했다(drift, `check_translation_drift.py`와 같은 비교). DB는 읽기만 했다.
+
+| 역본 | 범위 | 파서 변경으로 바뀐 절 | DB와 다른 절 |
+| --- | --- | --- | --- |
+| SBLM (35) | **전권** 1,189장 31,103절 | **1** | 2 |
+| RVR1909 (33) | 창·출·마·요·계 161장 5,100절 | 0 | 0 |
+| JPNMEB (36) | 같은 5권 161장 5,100절 | 0 | 0 |
+
+**기대값은 "차이 0"이었지만 SBLM에서 둘이 나왔다. 둘 다 이번 적재를 막는 문제는 아니다.**
+
+- **눅 4:18 — 파서 수정이 기존 결함을 고친 것이다.** SBLM 원문에도 LSG와 같은 모양이 한 곳 있었다.
+
+  ```html
+  <span class='wj'>Me ha enviado a sanar a los corazones</span><a class="notemark">*<span class="popup">NU omite …</span></a><span class='wj'>rotos, </span>
+  ```
+
+  DB에는 `… a los corazonesrotos, …`로 붙은 채 들어 있고 새 파서는 `corazones rotos`를 만든다. 20장 표본([3.1](#31-확인하지-못한-것) 5)에서는 보이지 않던 곳이다.
+- **롬 16:25 — 원문 변경이다.** 수정 전 파서도 같은 결과를 내므로 파서와 무관하다. DB에는 24절까지만 있다. 지금 원문은 그 뒤에 25절 마커를 두고 각주만 달아 `(omitted)`로 파싱된다(26·27절은 원문에도 없다). SBLM은 개정 중인 초안이다.
+
+두 절 모두 missing-only 삽입으로는 바뀌지 않는다. **사용자 승인을 받아 LSG 적재가 끝난 뒤 고쳤다.**
+
+1. 눅 4:18 행 하나를 지웠다(행이 정확히 하나이고 본문에 `corazonesrotos`가 있을 때만 지우도록 확인).
+2. `BIBLE_TRANSLATION_ID=35`로 눅 4장과 롬 16장을 다시 적재했다. 두 장 모두 `inserted=1`로, 해당 절 하나씩만 들어갔다.
+3. `check_translation_drift.py`로 눅·롬 전권을 다시 대조했다. 결과는 [14.6](#146-적재와-검증)에 있다.
+
+LSG 적재가 끝나기를 기다린 이유는 [14.7](#147-구현하며-드러난-것)에 있다(두 적재기를 동시에 돌리면 시퀀스가 되감긴다).
+
+### 14.4 DB 준비
+
+[6장](#6-db-준비)의 SQL을 한 트랜잭션으로 묶은 스크립트로 적용했다. CHECK 목록은 `pg_get_constraintdef()`에서 읽어 뒤에 붙였고, 읽은 값이 [6.1](#61-현재-상태-실측-2026-09-27)의 기록(언어 8개, 역본 종류 34개)과 다르면 멈추도록 했다. 드라이런(롤백) 뒤 커밋했다.
+
+```
+language_code CHECK     ko,en,zh,ja,es,de,la,el → … ,fr
+translation_type CHECK  34개 → 35개 (… ,CUVS,N1904,LSG1910)
+bible_translation       id=43  LSG1910  Louis Segond 1910  fr  translation_order=38
+bible_book              66행 (OLD 39 / NEW 27), book_key가 RVR1909와 66권 모두 같음
+```
+
+`translation_id`는 42가 아니라 **43**이다. N1904 때와 같이 드라이런이 identity 시퀀스 값 하나를 썼다.
+
+### 14.5 잘못 적재 방지
+
+[7.7](#77-잘못-적재-방지-검증)의 확인이다.
+
+| 실행 | 결과 |
+| --- | --- |
+| `BIBLE_TRANSLATION_ID=33` + `fraLSG` | `Source/translation mismatch: ebible source (version=fraLSG) requires translation_type='LSG1910'` |
+| `BIBLE_TRANSLATION_ID=43` + `spaRV1909` | `Source/translation mismatch: ebible source (version=spaRV1909) requires translation_type='RVR1909'` |
+| ID 없이 `BIBLE_TRANSLATION_TYPE=LSG1910`, `BIBLE_LANGUAGE_CODE=fr` | id 43으로 해석, 엔트리 URL은 `LSG1910_ENTRY_URL` |
+
+두 거부 모두 소스 요청 **전**에 일어난다.
+
+### 14.6 적재와 검증
+
+[9.2](#92-실행-예)의 DB 없는 확인 세 건(창 11장 32절, 마 5장 48절, 시 3편 9절)을 거쳐 창세기만 적재해 [7장](#7-검증)을 돌리고, 이상이 없어 2~66권을 적재했다. 경고·오류 0건, 재시도 0건. 창세기 약 2분, 2~66권 약 43분(회귀 검사 수집과 동시에 돌았다).
+
+```
+translation_id=43  LSG1910  Louis Segond 1910  fr  translation_order=38
+66권 / 1,189장 / 31,170절 (구약 23,211 / 신약 7,959)
+
+7.1  구멍 0 · 1절로 시작하지 않는 장 0 · 빈 절 0 · 절 없는 장 행 0
+     DB 본문 = 수집해 둔 1,189장의 오프라인 재파싱 결과 (31,170절 전부 글자 단위 일치)
+7.2  KJV와 절 수가 다른 장 106 (시편 62 / 그 밖 44) — 7.2의 고정 목록과 완전 일치
+     LSG에만 있는 절 번호 114 / KJV에만 있는 절 번호 46
+7.3  대문자 12자 연속 0 · 숫자 0
+     마 5:15 "et on n’allume pas …" · 스 5:12 "Mais après que …" · 창 11:9 소제목 없음
+7.4  mojibake 0 · NFC 아님 0 · NBSP 0 · U+2019 22,546절 · ASCII ' 0 · Éternel 6,973회 · Eternel 0
+7.5  sacrificateur 766절(846회) / prêtre 40절(46회)
+     요일 5:7 "Car il y en a trois qui rendent témoignage:" (삼위 증언 구절 없음)
+     행 28:29 [ … ] · 삼상 6:19 [cinquante mille] · 시 3:1 표제만 · 시 3:2 "O Éternel, …"
+7.6  DB = 재파싱 결과이므로 B와의 차이는 14.2의 100곳 그대로
+```
+
+유다서를 다시 돌리면 `inserted=0, skipped=25`로 총계가 변하지 않는다.
+
+SBLM을 고친 뒤 `check_translation_drift.py --translation-id 35`로 대조한 결과, 눅 1,151절과 롬 434절 모두 **차이 0**이다.
+
+### 14.7 구현하며 드러난 것
+
+- **[5.1](#51-a안--ebible-fralsg) ②의 첫 설계는 동작하지 않았다.** 마커를 `" "` 노드로 바꾸면 누적 루프가 공백 노드를 건너뛰어 `eton`이 그대로 남는다. 구현 전에 한 줄짜리 실험으로 확인하고 공백을 뒤 텍스트 노드에 붙이는 방식으로 바꿨다. 설계 문서의 코드도 고쳤다.
+- **DB는 Supabase 트랜잭션 풀러(6543)를 거친다. 세션 수준 설정이 다른 클라이언트에게 샌다.** 회귀 검사 스크립트의 연결을 `set_session(readonly=True, autocommit=True)`로 바꿨더니, psycopg2가 세션 수준 `SET default_transaction_read_only = on`을 보냈다. 그 설정이 풀러의 공유 백엔드에 남았고, 이어서 그 백엔드를 받은 DB 준비 드라이런이 `cannot execute ALTER TABLE in a read-only transaction`으로 실패했다.
+  - 곧바로 스크립트를 멈췄다.
+  - 그 시점의 Supavisor 백엔드 14개를 모두 확인했고, 읽기 전용이 남은 것은 없었다.
+  - 같은 DB의 JDBC 연결 15개(서비스로 보인다)는 `application_name`이 Supavisor가 아닌 직접 연결이라 공유 백엔드를 받을 수 없었다.
+  - 이후 모든 스크립트는 `SET LOCAL`이나 autocommit 없는 `readonly`(트랜잭션마다 `BEGIN READ ONLY`)만 쓴다. CLAUDE.md의 DB 계약에 적었다.
+- **두 적재기를 동시에 돌리면 안 된다.** `sync_identity_sequences()`는 시작할 때 `setval(seq, MAX(id))`를 조건 없이 실행하고, `MAX(id)`에는 커밋된 행만 보인다. 다른 적재기가 장 하나를 쓰는 중이면 시퀀스가 그 아래로 되감겨 다음 삽입이 기본 키에서 충돌한다. SBLM 두 절 수정을 LSG 적재가 끝난 뒤로 미룬 이유다. 이번 작업의 적재 실행은 모두 순차였다. CLAUDE.md의 DB 계약에 적었다.
+- **`ALTER TABLE`은 열린 읽기 트랜잭션에 막힌다.** 처음 회귀 스크립트는 읽기 트랜잭션을 끝내지 않아 `bible_translation`의 ACCESS SHARE 잠금을 쥐고 있었다. 그대로 `ALTER TABLE`을 보내면 대기열에 선 ACCESS EXCLUSIVE 요청 뒤로 **다른 모든 읽기가 막힌다.** 회귀 스크립트는 읽은 직후 트랜잭션을 닫게 바꿨고, DB 준비 스크립트에는 `SET LOCAL lock_timeout = '5s'`를 넣어 기다리지 않고 실패하게 했다.

@@ -868,6 +868,139 @@ def test_parse_verses_from_ebible_page_keeps_body_text_that_has_a_footnote() -> 
     assert "En el principio" in verses[0].text
 
 
+def _lsg_scraper() -> HolyBibleScraper:
+    return HolyBibleScraper(entry_url="https://ebible.org/fraLSG/GEN01.htm", sleep_min=0.0, sleep_max=0.0)
+
+
+def test_ebible_drops_a_second_level_major_heading() -> None:
+    """fraLSG Genesis 11 carries a major heading block between verses 9 and 10.
+
+    div.ms, div.mr, div.s and div.r were already dropped; div.ms2 was not, so the
+    accumulator appended "DEPUIS ABRAHAM JUSQU’À JOSEPH" to verse 9 (the only such verse
+    in the translation, and invisible to verse-count checks).
+    """
+    html = """
+    <div class="main"><div class='p'>
+    <span class="verse" id="V9">9&#160;</span>C’est pourquoi on l’appela du nom de Babel.   </div><div
+    class='ms'>LES ANCÊTRES DU PEUPLE D’ISRAËL  </div><div class='ms2'>DEPUIS ABRAHAM JUSQU’À JOSEPH  </div><div
+    class='mr'>Ch. 11:10 à 50. (És 51:1, 2.)  </div><div class='s'>Postérité de Sem </div> <div
+    class='r'>V. 10-32: cf. 1 Ch 1:17-27.  </div><div class='p'> <span class="verse" id="V10">10&#160;</span><a
+    href="#FN3" class="notemark">c<span class="popup">Ge 10:22, etc.</span></a>Voici la postérité de Sem.</div>
+    </div>
+    """
+    verses = _lsg_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [9, 10]
+    assert verses[0].text == "C’est pourquoi on l’appela du nom de Babel."
+    assert verses[1].text == "Voici la postérité de Sem."
+
+
+def test_ebible_keeps_a_space_where_a_note_marker_split_two_words() -> None:
+    """fraLSG sets 189 markers between two words with no space around them.
+
+    On screen the superscript separates the words; deleting it glued them into "eton"
+    (Matthew 5:15) and "Maisaprès" (Ezra 5:12), which no SQL check can find.
+    """
+    html = """
+    <div class="main"><div class='p'>
+    <span class="verse" id="V15">15&#160;</span><span class='wj'>et</span><a href="#FN10"
+    class="notemark">j<span class="popup">Mc 4:21. Lu 3:16; 11:33.</span></a><span class='wj'>on n’allume
+    pas une lampe.</span>   <span class="verse" id="V16">16&#160;</span><span class='it'>Mais</span><a
+    href="#FN11" class="notemark">b<span class="popup">2 Ch 36:16, 17, etc.</span></a><span class='it'>après
+    que nos pères</span> eurent irrité le Dieu des cieux.</div>
+    </div>
+    """
+    verses = _lsg_scraper().parse_verses_from_html(html)
+
+    assert [verse.text for verse in verses] == [
+        "et on n’allume pas une lampe.",
+        "Mais après que nos pères eurent irrité le Dieu des cieux.",
+    ]
+
+
+def test_ebible_adds_no_space_where_a_note_marker_touches_punctuation() -> None:
+    """The space goes in only between two letters.
+
+    Adding it unconditionally would put a space before punctuation ("terre .") and after
+    an elided article ("l’ Éternel"), and would change already-loaded eBible text.
+    """
+    html = """
+    <div class="main"><div class='p'>
+    <span class="verse" id="V1">1&#160;</span>Au commencement<a href="#FN1" class="notemark">a<span
+    class="popup">Job 38:4.</span></a>, Dieu créa les cieux et la terre<a href="#FN2" class="notemark">b<span
+    class="popup">Ps 33:6.</span></a>. Et l’<a href="#FN3" class="notemark">c<span
+    class="popup">Ps 124:8.</span></a>Éternel <a href="#FN4" class="notemark">d<span
+    class="popup">Jn 1:1.</span></a>parla.</div>
+    </div>
+    """
+    verses = _lsg_scraper().parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert verses[0].text == "Au commencement, Dieu créa les cieux et la terre. Et l’Éternel parla."
+
+
+def test_ebible_keeps_a_numbered_psalm_title() -> None:
+    """A long LSG psalm title is verse 1 itself, inside div.q after the V1 marker.
+
+    It is not the unnumbered div.d superscription that every translation here drops:
+    losing it would make the chapter start at verse 2, and the loader skips such a
+    chapter, so 62 psalms would silently go missing.
+    """
+    html = """
+    <div class="main">
+    <div class='chapterlabel' id="V0"> 3</div><div class='r'>2 S 15; 16. Ps 4; 5.  </div><div class='q'> <span
+    class="verse" id="V1">1&#160;</span>Psaume de David. A l’occasion de sa <a href="#FN1"
+    class="notemark">a<span class="popup">2 S 15:16, 17, 18.</span></a>fuite devant Absalom, son fils.   </div><div
+    class='b'> &#160; </div> <div class='q'> <span class="verse" id="V2">2&#160;</span>O Éternel, que mes
+    ennemis sont nombreux!  </div><div class='q'>Quelle multitude se lève contre moi!   </div>
+    </div>
+    """
+    verses = _lsg_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [1, 2]
+    assert verses[0].text == "Psaume de David. A l’occasion de sa fuite devant Absalom, son fils."
+    assert verses[1].text == "O Éternel, que mes ennemis sont nombreux! Quelle multitude se lève contre moi!"
+
+
+def test_ebible_keeps_selah_line() -> None:
+    """div.qs holds "— Pause." (Selah), which is printed text of the verse, not a heading."""
+    html = """
+    <div class="main">
+    <div class='q'> <span class="verse" id="V3">3&#160;</span>Combien qui disent à mon sujet:  </div><div
+    class='q'>Plus de salut pour lui auprès de Dieu! </div><div class='qs'>— Pause.</div>   <div class='q'> <span
+    class="verse" id="V4">4&#160;</span>Mais toi, ô Éternel! Tu es mon bouclier,  </div>
+    </div>
+    """
+    verses = _lsg_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [3, 4]
+    assert verses[0].text == "Combien qui disent à mon sujet: Plus de salut pour lui auprès de Dieu! — Pause."
+
+
+def test_ebible_ignores_a_book_introduction() -> None:
+    """fraLSG opens each book with a modern introduction before the first verse marker.
+
+    It is commentary, not 1910 text. The accumulator collects nothing before a marker,
+    and this pins that down now that a source actually carries such blocks.
+    """
+    html = """
+    <div class="main">
+    <div class='mt'>LA GENÈSE  </div><div class='imt'>INTRODUCTION À LA GENÈSE  </div><div class='ip'>Le titre du
+    premier livre de la Bible signifie «origine».  </div><div class='io'>Création du monde (1–3)</div><table><tr><td>
+    Plan</td></tr></table><div class='ie'></div>
+    <div class='ms'>LES TEMPS ANCIENS  </div><div class='chapterlabel' id="V0"> 1</div><div class='ms2'>DEPUIS LA
+    CRÉATION JUSQU’À ABRAHAM  </div><div class='mr'>Ch. 1 à 11: 9.  </div><div class='s'>Création du monde </div>
+    <div class='r'>V. 1: cf. Né 9:6.  </div><div class='p'> <span class="verse" id="V1">1&#160;</span>Au <a
+    href="#FN1" class="notemark">a<span class="popup">Job 38:4.</span></a>commencement, Dieu créa les cieux et
+    la terre.   </div>
+    </div>
+    """
+    verses = _lsg_scraper().parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert verses[0].text == "Au commencement, Dieu créa les cieux et la terre."
+
+
 def _jpnm_scraper() -> HolyBibleScraper:
     scraper = HolyBibleScraper(entry_url="https://ebible.org/jpnm/GEN01.htm")
     scraper.sleep_min = 0.0
