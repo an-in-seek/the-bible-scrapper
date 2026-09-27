@@ -2,7 +2,7 @@
 
 성경 본문을 스크래핑해 PostgreSQL의 `bible_chapter`, `bible_verse`에 적재하는 도구입니다.
 
-현재 기준으로 안정적으로 맞춰진 소스는 아래 10개입니다.
+현재 기준으로 안정적으로 맞춰진 소스는 아래 11개입니다.
 
 - `thekingsbible.com` KJV
 - `bskorea.or.kr` NKRV(`version=GAE`)
@@ -14,6 +14,7 @@
 - `jpn.bible` KOUGO(`kougo`, 口語訳聖書 1954/1955 — 일본어)
 - `zh.wikisource.org` CUVT(`zh-hant`, 聖經和合本 1919 — 중국어 번체)
 - `zh.wikisource.org` CUVS(`zh-hans`, 圣经和合本 1919 — 중국어 간체)
+- `studybible.info` N1904(`Nestle`, Nestle 1904 그리스어 신약 — 신약 27권만)
 
 설계 문서:
 
@@ -25,6 +26,7 @@
 - JPNMEB: [docs/japanese-public-domain-scraping-design.md](docs/japanese-public-domain-scraping-design.md)
 - KOUGO: [docs/japanese-colloquial-1955-scraping-design.md](docs/japanese-colloquial-1955-scraping-design.md)
 - CUVT/CUVS: [docs/chinese-union-version-1919-scraping-design.md](docs/chinese-union-version-1919-scraping-design.md)
+- N1904: [docs/greek-new-testament-nestle-1904-scraping-design.md](docs/greek-new-testament-nestle-1904-scraping-design.md)
 
 ## 주요 특징
 
@@ -57,6 +59,7 @@
 - `docs/new-japanese-nt-scraping-design.md`: JPNLOC(일본어 신약) 설계 문서 (미구현)
 - `docs/japanese-colloquial-1955-scraping-design.md`: KOUGO(일본어 口語訳 1954/1955) 설계 문서
 - `docs/chinese-union-version-1919-scraping-design.md`: CUVT/CUVS(중국어 和合本 1919) 설계 문서
+- `docs/greek-new-testament-nestle-1904-scraping-design.md`: N1904(그리스어 신약 Nestle 1904) 설계 문서. Rahlfs LXX 1935 불채택 근거 포함
 
 ## 요구 사항
 
@@ -107,13 +110,14 @@ RVR1909_ENTRY_URL=https://ebible.org/spaRV1909/GEN01.htm
 SBLM_ENTRY_URL=https://ebible.org/spablm/GEN01.htm
 JPNMEB_ENTRY_URL=https://ebible.org/jpnm/GEN01.htm
 KOUGO_ENTRY_URL=https://jpn.bible/kougo/gen#1
+N1904_ENTRY_URL=https://studybible.info/Nestle/Matthew%201
 CUVT_ENTRY_URL=https://zh.wikisource.org/zh-hant/%E8%81%96%E7%B6%93_(%E5%92%8C%E5%90%88%E6%9C%AC)/%E5%89%B5%E4%B8%96%E8%A8%98#1
 CUVS_ENTRY_URL=https://zh.wikisource.org/zh-hans/%E8%81%96%E7%B6%93_(%E5%92%8C%E5%90%88%E6%9C%AC)/%E5%89%B5%E4%B8%96%E8%A8%98#1
 ```
 
 `--entry-url`를 지정하지 않으면 기본 URL은 아래 순서로 결정됩니다.
 
-1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JPNMEB` / `KOUGO` / `CUVT` / `CUVS`)에 해당하는 환경변수
+1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JPNMEB` / `KOUGO` / `CUVT` / `CUVS` / `N1904`)에 해당하는 환경변수
 2. `BIBLE_TRANSLATION_ID=2` 또는 `BIBLE_TRANSLATION_NAME=개역개정`이면 `NKRV_ENTRY_URL`
 3. `BIBLE_LANGUAGE_CODE`로 좁혀지는 소스가 하나면 그 값
    - `ko` -> `NKRV_ENTRY_URL`
@@ -121,8 +125,9 @@ CUVS_ENTRY_URL=https://zh.wikisource.org/zh-hans/%E8%81%96%E7%B6%93_(%E5%92%8C%E
    - `es` -> `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` 중 설정된 것
    - `ja` -> `JPNMEB_ENTRY_URL` / `KOUGO_ENTRY_URL` 중 설정된 것
    - `zh` -> `CUVT_ENTRY_URL` / `CUVS_ENTRY_URL` 중 설정된 것
+   - `el` -> `N1904_ENTRY_URL` (본문은 코이네 그리스어지만 DB의 `language_code` CHECK가 `grc`가 아닌 `el`을 허용하므로 `el`로 등록되어 있습니다)
 4. 설정된 엔트리 URL이 하나뿐이면 그 값
-5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JPNMEB` -> `KOUGO` -> `CUVT` -> `CUVS` 순으로 선택
+5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JPNMEB` -> `KOUGO` -> `CUVT` -> `CUVS` -> `N1904` 순으로 선택
 6. 아무것도 없으면 내장 기본값 `https://thekingsbible.com/Bible/1/1` 사용
 
 주의: `BIBLE_LANGUAGE_CODE`만으로는 소스가 특정되지 않습니다.  
@@ -412,6 +417,40 @@ CUVS_ENTRY_URL=https://zh.wikisource.org/zh-hans/%E8%81%96%E7%B6%93_(%E5%92%8C%E
 
 > eBible.org 의 `cmn-cu89s`/`cmn-cu89t` 는 1919년판이 아니라 **1988년 新標點和合本**입니다.
 > 편의는 크지만 판본과 권리 관계가 달라 채택하지 않았습니다(설계 문서 1.3).
+
+### 10. N1904 `studybible.info`
+
+『Η Καινή Διαθήκη』(Nestle 1904). 영국성서공회가 1904년에 낸 그리스어 신약 비평본문이며,
+네슬레가 1913년에 사망해 관할을 가리지 않고 퍼블릭 도메인입니다. 자세한 근거는
+[설계 문서](docs/greek-new-testament-nestle-1904-scraping-design.md) 1장에 있습니다.
+
+```env
+N1904_ENTRY_URL=https://studybible.info/Nestle/Matthew%201
+```
+
+**신약 27권만 있는 첫 역본입니다.** `bible_book`에 40~66번 27행만 넣으면 기본 실행
+(`--start-book 1 --end-book 66`)이 자연히 신약만 돌립니다. 구약 책 이름을 요청하면 이 소스는
+404가 아니라 **200에 빈 본문**을 돌려주므로, URL 빌더가 `book_order < 40`을 거부합니다.
+
+이 소스만의 처리:
+
+- **KJV 신약과 절 수가 다릅니다: −17 +2.** 비평본문이 싣지 않는 17절(마 17:21 등)이 없고,
+  Nestle이 따로 세는 2절(요삼 1:15, 계 12:18)이 있습니다. 7,957 − 17 + 2 = **7,942**입니다.
+- **절 번호에 구멍이 남습니다**(15곳 / 14개 장). 소스가 그 자리에 아무 표시도 하지 않으므로
+  `(omitted)` 마커를 쓰지 않습니다. ASV가 이미 같은 방식으로 16곳을 담고 있습니다.
+- **행 19장과 고후 13장은 구멍 없이 한 절 짧습니다.** 마지막 두 절을 합쳤기 때문이라
+  연속성 검사로는 잡히지 않고 KJV 대조로만 드러납니다.
+- **NFC로 정규화해 저장합니다.** 원문의 27%가 NFC가 아니고(U+0387 2,359개, 이형 악센트 21개),
+  그중 하나가 마태복음 1:1의 첫 낱말 `Βίβλος`라 그대로 저장하면 검색에 걸리지 않습니다.
+- **편집 괄호 `[[ ]]` `[ ]` `< >`는 그대로 둡니다**(13개 절). 네슬레 판본의 일부입니다.
+- **`language_code`는 `el`입니다.** 본문은 현대 그리스어가 아니라 코이네지만, DB가 `el`로
+  등록했습니다. `BIBLE_LANGUAGE_CODE=grc`로는 역본을 찾지 못합니다.
+
+적재 결과는 27권 / 260장 / **7,942절**입니다.
+
+> eBible.org 의 `grcbyz`는 제목이 `1904 Patriarchal Greek New Testament`라 연도가 같지만
+> **1904년 콘스탄티노폴리스 총대주교청판**으로 계보가 다릅니다. 기존 eBible 어댑터로 바로
+> 적재되기까지 해서 더 헷갈리기 쉽습니다(설계 문서 10.1).
 
 ## 네트워크와 재시도
 

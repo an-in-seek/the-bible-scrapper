@@ -1,6 +1,10 @@
+import re
+import unicodedata
+
+import pytest
 from bs4 import BeautifulSoup
 
-from scraper import OMITTED_VERSE_TEXT, HolyBibleScraper
+from scraper import BIBLEGATEWAY_BOOK_NAMES, OMITTED_VERSE_TEXT, HolyBibleScraper
 
 
 def test_parse_verses_with_regex_fallback() -> None:
@@ -1415,3 +1419,168 @@ def test_wikisource_rejects_a_multi_chapter_page() -> None:
     scraper = _wikisource_scraper()
 
     assert scraper._extract_verses_from_wikisource_page(BeautifulSoup(html, "html.parser")) == []
+
+
+STUDYBIBLE_ENTRY_URL = "https://studybible.info/Nestle/Matthew%201"
+# One chapter as the source serves it: a single div.passage holding the version link and
+# then bare text between sup > a.verse_ref markers. There are no block elements inside.
+STUDYBIBLE_CHAPTER_HTML = """
+<div class="passage row Nestle">Nestle<sup><a class="version_info" href="/version/Nestle">(i)</a></sup>
+<sup><a class="verse_ref Nestle" href="/Nestle/Matthew%201:1" title="Matthew 1:1 Nestle">1</a></sup>
+Βίβλος γενέσεως.
+<sup><a class="verse_ref Nestle" href="/Nestle/Matthew%201:2" title="Matthew 1:2 Nestle">2</a></sup>
+Ἀβραὰμ ἐγέννησεν.
+</div>
+"""
+
+
+def _studybible_scraper() -> HolyBibleScraper:
+    return HolyBibleScraper(entry_url=STUDYBIBLE_ENTRY_URL)
+
+
+def test_studybible_source_is_recognised() -> None:
+    scraper = _studybible_scraper()
+
+    assert scraper.get_source_name() == "studybible"
+    # The version token is the first path segment; this host serves more than sixty
+    # translations, so without it every one of them would validate as N1904.
+    assert scraper.get_source_version() == "Nestle"
+    assert scraper.sleep_min >= 1.0
+
+
+def test_studybible_parses_verses() -> None:
+    verses = _studybible_scraper().parse_verses_from_html(STUDYBIBLE_CHAPTER_HTML)
+
+    assert [verse.verse_number for verse in verses] == [1, 2]
+    assert verses[0].text == "Βίβλος γενέσεως."
+    assert not verses[0].text.startswith("1")
+
+
+def test_studybible_drops_the_version_link() -> None:
+    # "Nestle" and the "(i)" link sit before the first marker, so accumulating between
+    # markers drops them; a Latin letter anywhere in the text means that broke.
+    verses = _studybible_scraper().parse_verses_from_html(STUDYBIBLE_CHAPTER_HTML)
+
+    assert all(not re.search(r"[A-Za-z]", verse.text) for verse in verses)
+
+
+def test_studybible_normalises_to_nfc() -> None:
+    # 27% of this source is not NFC. The codepoints below are spelled out because their
+    # NFC results are visually identical: retyping them by hand silently voids the test.
+    OXIA_IOTA = "ί"          # NFC -> U+03AF, the iota a keyboard produces
+    OXIA_ALPHA = "ά"         # NFC -> U+03AC
+    ANO_TELEIA = "·"         # NFC -> U+00B7 MIDDLE DOT
+    html = (
+        '<div class="passage row Nestle">'
+        '<sup><a class="verse_ref Nestle" title="Matthew 1:1 Nestle">1</a></sup>'
+        f"Β{OXIA_IOTA}βλος γενέσεως"
+        f"{ANO_TELEIA} Ἀβρ{OXIA_ALPHA}μ."
+        "</div>"
+    )
+
+    verses = _studybible_scraper().parse_verses_from_html(html)
+
+    # Matthew 1:1 really opens with an oxia iota, so stored as-is the first verse of the
+    # New Testament would not match a normally typed "Βίβλος".
+    assert verses[0].text.startswith("Βίβλος")
+    assert OXIA_IOTA not in verses[0].text
+    assert OXIA_ALPHA not in verses[0].text
+    assert ANO_TELEIA not in verses[0].text
+    assert "·" in verses[0].text
+    assert unicodedata.normalize("NFC", verses[0].text) == verses[0].text
+
+
+def test_studybible_keeps_editorial_brackets() -> None:
+    # Nestle's own sigla: [[ ]] for very early interpolations, < > where ancient
+    # authority is in part wanting. They open and close in different verses, so neither
+    # verse is balanced on its own.
+    html = """
+    <div class="passage row Nestle">
+    <sup><a class="verse_ref Nestle" title="Mark 16:9 Nestle">9</a></sup> [[Ἀναστὰς δὲ.
+    <sup><a class="verse_ref Nestle" title="Mark 16:20 Nestle">20</a></sup> ἐκεῖνοι δὲ.]]
+    <sup><a class="verse_ref Nestle" title="Mark 16:21 Nestle">21</a></sup> <Υἱοῦ Θεοῦ>.
+    </div>
+    """
+    verses = _studybible_scraper().parse_verses_from_html(html)
+
+    assert verses[0].text.startswith("[[")
+    assert verses[1].text.endswith("]]")
+    assert verses[2].text == "<Υἱοῦ Θεοῦ>."
+
+
+def test_studybible_leaves_a_numbering_gap_alone() -> None:
+    # The source prints nothing at all where it omits a verse, so there is no evidence to
+    # justify an OMITTED_VERSE_TEXT marker. 14 chapters look like this; ASV is already
+    # stored the same way.
+    html = """
+    <div class="passage row Nestle">
+    <sup><a class="verse_ref Nestle" title="Matthew 17:20 Nestle">20</a></sup> ἐὰν ἔχητε.
+    <sup><a class="verse_ref Nestle" title="Matthew 17:22 Nestle">22</a></sup> Συστρεφομένων δὲ.
+    </div>
+    """
+    verses = _studybible_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [20, 22]
+    assert all(verse.text != OMITTED_VERSE_TEXT for verse in verses)
+
+
+def test_studybible_rejects_a_page_that_mixes_chapters() -> None:
+    html = """
+    <div class="passage row Nestle">
+    <sup><a class="verse_ref Nestle" title="Matthew 1:1 Nestle">1</a></sup> α.
+    <sup><a class="verse_ref Nestle" title="Matthew 2:1 Nestle">1</a></sup> β.
+    </div>
+    """
+    scraper = _studybible_scraper()
+
+    assert scraper._extract_verses_from_studybible_page(BeautifulSoup(html, "html.parser")) == []
+
+
+def test_studybible_returns_empty_for_a_book_the_edition_lacks() -> None:
+    # An Old Testament or out-of-range chapter answers 200 with an empty passage box
+    # rather than 404, which is why _build_studybible_url refuses those book orders.
+    html = '<div class="passage row Nestle">Nestle<sup><a class="version_info">(i)</a></sup></div>'
+    scraper = _studybible_scraper()
+
+    assert scraper._extract_verses_from_studybible_page(BeautifulSoup(html, "html.parser")) == []
+
+
+def test_studybible_parser_returns_empty_for_other_sources() -> None:
+    scraper = _studybible_scraper()
+
+    for html in (
+        "<div class='bible_read'><p>1 text</p></div>",
+        "<div class='main'><div class='p'><span class='verse' id='V1'>1 </span>texto</div></div>",
+        "<div id='1'><p><span class='verse' id='1:1'><span class='verse-content'>本文</span></span></p></div>",
+        WIKISOURCE_CHAPTER_HTML,
+        # Same site, different translation: the container class must gate the parser.
+        "<div class='passage row KJV'><sup><a class='verse_ref KJV'"
+        " title='Matthew 1:1 KJV'>1</a></sup> The book</div>",
+    ):
+        assert scraper._extract_verses_from_studybible_page(BeautifulSoup(html, "html.parser")) == []
+
+
+def test_studybible_chapter_urls_cover_the_new_testament_only() -> None:
+    scraper = _studybible_scraper()
+
+    assert scraper._build_chapter_url(46, 13) == "https://studybible.info/Nestle/1%20Corinthians%2013"
+    assert len(scraper.discover_chapter_urls_for_book(40)) == 28
+    assert len(scraper.discover_chapter_urls_for_book(66)) == 22
+    # Old Testament books are not merely skipped, they are refused: the source answers
+    # 200 for them and the generic chain reads that page as two verses starting at 1.
+    assert scraper.discover_chapter_urls_for_book(1) == {}
+    for book_order in (1, 39, 67):
+        with pytest.raises(ValueError):
+            scraper._build_studybible_url(book_order, 1)
+
+
+def test_studybible_book_names_come_from_the_shared_table() -> None:
+    # The 27 New Testament names this source uses are the ones BibleGateway uses, so no
+    # second book-name table is introduced.
+    assert BIBLEGATEWAY_BOOK_NAMES[39:66] == (
+        "Matthew", "Mark", "Luke", "John", "Acts", "Romans", "1 Corinthians",
+        "2 Corinthians", "Galatians", "Ephesians", "Philippians", "Colossians",
+        "1 Thessalonians", "2 Thessalonians", "1 Timothy", "2 Timothy", "Titus",
+        "Philemon", "Hebrews", "James", "1 Peter", "2 Peter", "1 John", "2 John",
+        "3 John", "Jude", "Revelation",
+    )

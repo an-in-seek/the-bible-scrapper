@@ -26,6 +26,7 @@ ENTRY_URL_ENV_BY_TRANSLATION_TYPE = {
     "KOUGO": "KOUGO_ENTRY_URL",
     "CUVT": "CUVT_ENTRY_URL",
     "CUVS": "CUVS_ENTRY_URL",
+    "N1904": "N1904_ENTRY_URL",
 }
 # A language code alone does not identify a source: 'en' covers KJV, WEB and ASV.
 TRANSLATION_TYPES_BY_LANGUAGE_CODE = {
@@ -34,11 +35,15 @@ TRANSLATION_TYPES_BY_LANGUAGE_CODE = {
     "es": ("RVR1909", "SBLM"),
     "ja": ("JPNMEB", "KOUGO"),
     "zh": ("CUVT", "CUVS"),
+    # The text is Koine, but bible_translation stores 'el': the DB's language_code CHECK
+    # admits 'el' and not 'grc'. A Modern Greek translation added later would share it.
+    "el": ("N1904",),
 }
 LEGACY_TRANSLATION_TYPE_BY_ID = {"2": "NKRV"}
 # Tie-break when nothing else narrows it down; keeps the pre-WEB default.
 ENTRY_URL_PREFERENCE_ORDER = (
     "NKRV", "KJV", "WEB", "ASV", "RVR1909", "SBLM", "JPNMEB", "KOUGO", "CUVT", "CUVS",
+    "N1904",
 )
 # Which source may legitimately produce each translation, and how to recognise the
 # translation when bible_translation.translation_type is empty. Drives the
@@ -108,6 +113,17 @@ TRANSLATION_SOURCE_REQUIREMENTS = {
         "version": "zh-hans",
         "name": "圣经和合本",
         "language_code": "zh",
+    },
+    "N1904": {
+        # studybible.info serves more than sixty translations from one host and puts the
+        # version in the first path segment, so leaving `version` empty here would let
+        # /KJV/Matthew 1 load as N1904.
+        "source": "studybible",
+        "version": "Nestle",
+        # Must match bible_translation.name exactly: _translation_type_by_identity()
+        # recovers the translation from (name, language_code).
+        "name": "Η Καινή Διαθήκη (Nestle 1904)",
+        "language_code": "el",
     },
 }
 
