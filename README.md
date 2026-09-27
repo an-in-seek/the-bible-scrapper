@@ -27,6 +27,7 @@
 - KOUGO: [docs/japanese-colloquial-1955-scraping-design.md](docs/japanese-colloquial-1955-scraping-design.md)
 - CUVT/CUVS: [docs/chinese-union-version-1919-scraping-design.md](docs/chinese-union-version-1919-scraping-design.md)
 - N1904: [docs/greek-new-testament-nestle-1904-scraping-design.md](docs/greek-new-testament-nestle-1904-scraping-design.md)
+- 프랑스어(LSG 1910 · Ostervald · Martin, 미구현): [docs/french-public-domain-scraping-design.md](docs/french-public-domain-scraping-design.md)
 
 ## 주요 특징
 
@@ -60,6 +61,7 @@
 - `docs/japanese-colloquial-1955-scraping-design.md`: KOUGO(일본어 口語訳 1954/1955) 설계 문서
 - `docs/chinese-union-version-1919-scraping-design.md`: CUVT/CUVS(중국어 和合本 1919) 설계 문서
 - `docs/greek-new-testament-nestle-1904-scraping-design.md`: N1904(그리스어 신약 Nestle 1904) 설계 문서. Rahlfs LXX 1935 불채택 근거 포함
+- `docs/french-public-domain-scraping-design.md`: 프랑스어 역본 설계 문서 (미구현). LSG 1910은 절 체계 결정 대기, Ostervald·Martin은 보류
 
 ## 요구 사항
 

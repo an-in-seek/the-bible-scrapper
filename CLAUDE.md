@@ -34,6 +34,7 @@ Design documents:
 - [docs/japanese-colloquial-1955-scraping-design.md](docs/japanese-colloquial-1955-scraping-design.md) — KOUGO (口語訳 1954/1955)
 - [docs/chinese-union-version-1919-scraping-design.md](docs/chinese-union-version-1919-scraping-design.md) — CUVT/CUVS (和合本 1919)
 - [docs/greek-new-testament-nestle-1904-scraping-design.md](docs/greek-new-testament-nestle-1904-scraping-design.md) — N1904 (Nestle 1904 Greek NT), and why Rahlfs LXX 1935 is rejected
+- [docs/french-public-domain-scraping-design.md](docs/french-public-domain-scraping-design.md) — French: LSG 1910 (설계만·미구현, 절 체계 결정 대기), Ostervald·Martin 보류
 
 ## Common commands
 
