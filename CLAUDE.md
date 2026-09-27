@@ -14,12 +14,28 @@ Supported sources:
 | `bskorea.or.kr` (`version=GAE`) | NKRV | Implemented |
 | `biblegateway.com` (`version=WEB`) | WEB (World English Bible) | Implemented |
 | `biblegateway.com` (`version=ASV`) | ASV (American Standard Version) | Implemented |
+| `ebible.org` (`spaRV1909`) | RVR1909 (Reina Valera 1909, Spanish) | Implemented |
+| `ebible.org` (`spablm`) | SBLM (Santa Biblia libre para el mundo, Spanish) | Implemented |
+| `ebible.org` (`jpnm`) | JPNMEB (フリーダム・バイブル, Japanese) | Implemented |
+| `jpn.bible` (`kougo`) | KOUGO (口語訳聖書 1954/1955, Japanese) | Implemented |
+| `zh.wikisource.org` (`zh-hant`) | CUVT (聖經和合本 1919, Chinese traditional) | Implemented |
+| `zh.wikisource.org` (`zh-hans`) | CUVS (圣经和合本 1919, Chinese simplified) | Implemented |
+| `studybible.info` (`Nestle`) | N1904 (Nestle 1904 Greek NT, New Testament only) | Implemented |
+| `ebible.org` (`fraLSG`) | LSG1910 (Louis Segond 1910, French, own verse numbering) | Implemented |
 
 Design documents:
 
 - [docs/nkrv-scraping-design.md](docs/nkrv-scraping-design.md) — NKRV
 - [docs/world-english-bible-scraping-design.md](docs/world-english-bible-scraping-design.md) — WEB
 - [docs/american-standard-version-scraping-design.md](docs/american-standard-version-scraping-design.md) — ASV
+- [docs/reina-valera-1909-scraping-design.md](docs/reina-valera-1909-scraping-design.md) — RVR1909
+- [docs/santa-biblia-libre-para-el-mundo-scraping-design.md](docs/santa-biblia-libre-para-el-mundo-scraping-design.md) — SBLM
+- [docs/japanese-public-domain-scraping-design.md](docs/japanese-public-domain-scraping-design.md) — JPNMEB (Japanese)
+- [docs/new-japanese-nt-scraping-design.md](docs/new-japanese-nt-scraping-design.md) — JPNLOC (Japanese NT, 설계만·미구현)
+- [docs/japanese-colloquial-1955-scraping-design.md](docs/japanese-colloquial-1955-scraping-design.md) — KOUGO (口語訳 1954/1955)
+- [docs/chinese-union-version-1919-scraping-design.md](docs/chinese-union-version-1919-scraping-design.md) — CUVT/CUVS (和合本 1919)
+- [docs/greek-new-testament-nestle-1904-scraping-design.md](docs/greek-new-testament-nestle-1904-scraping-design.md) — N1904 (Nestle 1904 Greek NT), and why Rahlfs LXX 1935 is rejected
+- [docs/french-public-domain-scraping-design.md](docs/french-public-domain-scraping-design.md) — LSG1910 (Louis Segond 1910, French), and why Ostervald and Martin are on hold
 
 ## Common commands
 
@@ -28,6 +44,8 @@ pip install -r requirements.txt
 pytest -q                                    # full test suite
 pytest -q -k bskorea                         # single group
 bash scripts/run_tests_wsl.sh                # WSL: create venv, install, run tests
+python3 scripts/check_translation_drift.py --entry-url <URL> --head-only   # source Last-Modified
+python3 scripts/check_translation_drift.py --translation-id <ID> --entry-url <URL>  # read-only diff
 python3 scrape_bible_to_db.py --test-genesis1              # parser-only check, no DB
 python3 scrape_bible_to_db.py --test-book 3 --test-chapter 11
 python3 scrape_bible_to_db.py --start-book 1 --end-book 3  # actual load
@@ -53,8 +71,11 @@ Data flow: read `bible_book` → build per-source chapter URLs → fetch HTML �
 
 - **Never create `bible_book` rows.** The tool assumes all 66 books already exist for the target `translation_id` and only reads them. `bible_translation` is read-only as well.
 - `bible_chapter` / `bible_verse` inserts are **missing-only**, so reruns are idempotent. Any change here needs an accompanying idempotency test.
+- The flip side of missing-only: **a source that revises its text is never corrected by re-running.** Fine for fixed editions, not for drafts. Detect drift with `scripts/check_translation_drift.py` (read-only), then delete and re-load. `bible_chapter` and `bible_verse` carry **no foreign keys**, so deletion must go **verses first, then chapters** — dropping chapters first orphans the verses beyond the reach of any book-scoped query. Do not "fix" this by adding an overwrite mode; that changes the idempotency contract for every source.
 - The transaction boundary is **per chapter**: a chapter row and its verses commit together. A failure mid-book keeps completed chapters and rolls back only the in-flight one; the retry re-processes the book and skips what already landed. Retries are still counted per book (`--book-retries`).
 - `sync_identity_sequences()` runs at startup to align sequences with `MAX(id)`. Skipping it causes duplicate PK errors.
+- **Never run two loaders at the same time**, even for different translations. That `setval` is unconditional and sees only committed rows, so a second loader starting up rewinds the sequence beneath the first loader's in-flight chapter, and the next inserts collide on the primary key. Read-only tools (`check_translation_drift.py`) are fine alongside a load.
+- **Keep every DB setting transaction-scoped.** The current `.env` reaches the DB through Supabase's transaction-mode pooler (port 6543), where consecutive transactions share backends with other clients, so a session-level `SET` outlives the script on a backend someone else gets next. psycopg2's `set_session(readonly=True, autocommit=True)` is exactly that — it sends `SET default_transaction_read_only = on` — and it made the next writer on that backend fail with `cannot execute ALTER TABLE in a read-only transaction`. Use `SET LOCAL`, or `set_session(readonly=True)` without autocommit (psycopg2 then opens each transaction `READ ONLY` and leaves the session default alone).
 
 ### Empty-data guards (intentional failures)
 
@@ -66,7 +87,8 @@ Data flow: read `bible_book` → build per-source chapter URLs → fetch HTML �
 `HolyBibleScraper._extract_verses()` is an ordered chain:
 
 ```
-bskorea → biblegateway → bibletable → chapter-prefixed → ordered list → structured nodes → regex fallback
+bskorea → biblegateway → ebible → jpnbible → wikisource → studybible → bibletable
+  → chapter-prefixed → ordered list → structured nodes → regex fallback
 ```
 
 - **Source-specific parsers go first, generic inference parsers last.** If `_extract_verses_from_structured_nodes()` runs first, it misreads menus, footnotes, and dropdown text as verses.
@@ -74,7 +96,31 @@ bskorea → biblegateway → bibletable → chapter-prefixed → ordered list �
 - `_extract_verses_from_bskorea_read_page()` calls `get_text("")` with no separator on purpose. Using `" "` splits Korean particles (e.g. `모세가` becomes `모세 가`).
 - `h3` / `h4.psalm-title` removal is **not dead code**: ASV tags editorial headings and psalm superscriptions with the verse-1 class, so dropping the rule silently prepends them to verse 1. WEB pages contain no `h3` at all, which is why only the ASV tests cover it.
 - `_extract_verses_from_biblegateway_passage()` reads verse numbers from the `span.text` **class token** (`Gen-2-1`), never from the rendered number: the first verse of a chapter displays the *chapter* number, so Genesis 2:1 would be stored as verse 2. It also merges same-numbered spans instead of deduplicating them (Psalms 23:4 arrives in four fragments) and drops `h4.psalm-title`, which carries the verse-1 class.
-- The four verses WEB leaves untranslated (Luke 17:36, Acts 8:37, 15:34, 24:7) are stored as `(omitted)` rather than skipped, so contiguous verse numbering stays an invariant and any real gap reads as a scrape failure. The marker is written **only** when the span holds a `sup.footnote` and no body text — never for an arbitrarily empty span, or a DOM change would quietly fill the DB with placeholders instead of failing.
+- `_extract_verses_from_ebible_page()` accumulates text **between** `span.verse` markers: on eBible the marker holds only the number and the body follows as sibling nodes. Verse numbers come from the `id` (`V12`), and chapter URLs pad the number per book — Psalms to three digits, everything else to two (`PSA23.htm` is a 404).
+- `EBIBLE_REMOVABLE_SELECTOR` drops `div.d`, `div.qa`, `div.qd`, and `div.sp` because those headings sit **between** verse markers, so the accumulator folds them into the surrounding verse — measured on spablm as 21 leaked verses in Psalms 119 and 8 in Song of Songs 1. The contamination passes every automated check (verse count, contiguity, no empty verses), so only a targeted query or a human catches it. The same goes for `div.ms2`: fraLSG puts one between Genesis 11:9 and 11:10, and before it was listed verse 9 ended in `DEPUIS ABRAHAM JUSQU’À JOSEPH`. Never drop `div.q`/`div.q2`/`div.b`/`div.qs` (they hold poetry text; `div.qs` is LSG's `— Pause.`) or `span.wj` (words of Jesus).
+- A `div.d` before the first verse marker is a **psalm superscription**, and it is deliberately not stored — matching KJV, NKRV, WEB, and ASV. RVR1909 is the lone exception only because that source inlines the superscription into verse 1 where the parser cannot separate it. Do not "fix" the difference by prepending it.
+- Leaving eBible pages to the generic parsers is the worst case in this repo: the regex fallback returns a full, contiguous verse list with the number glued into verse 1, so verse-count and contiguity checks both pass.
+- `_request_html()` re-decodes with `apparent_encoding` when `Content-Type` omits a charset. eBible declares UTF-8 only in a `<meta>` tag, and without this every Spanish accent is mojibake. Sources that send a charset are untouched — do not "simplify" this into an unconditional override.
+- `_extract_verses_from_jpnbible_page()` receives a **chapter slice, not a page**: jpn.bible serves one page per book and has no per-chapter URL, so `_fetch_soup()` fetches the book once, splits it on `main.book > div[id]`, and hands over one `div`. Its guard is therefore `span.verse-content`, not `main.book`, and it also checks the chapter half of every verse `id`: handed a whole book page it would otherwise concatenate each chapter's verse 1 and return a plausible 67-verse list, so a slice spanning more than one chapter returns `[]` with a warning. Keying that split by `int` instead of the fragment string makes every lookup miss and every chapter come back empty.
+- **`rt`/`rp` must be removed before the walk.** bs4 keeps furigana out of `get_text()`, but `RubyTextString`/`RubyParenthesisString` subclass `NavigableString`, so the descendants walk every accumulating parser here uses would fold `神（かみ）` into the verse. A `get_text()`-based test would pass while the DB fills with readings; measured at 2,197 of 2,205 sampled verses.
+- On jpn.bible the verse `id` carries the whole range: `id="132:3 Ps.132.4 Ps.132.5"` means 3–5, and reading only the first extra token loses Psalms 132:5. `id="22:3!a"` is half of a split verse, and Exodus 22 prints `3!b` **before** `3!a`, so the halves join by suffix, not document order. A merged range is stored at every number it covers, which keeps verse numbering contiguous.
+- jpn.bible leaves the opening bracket of a disputed passage at the end of the **previous** verse (19 verses, e.g. Matthew 17:20 ends with `〔`). The parser moves it to the head of the next verse; that is the only character-level edit made to this source, and it is what the second witness (`bible.religious-life.com`) does too.
+- `_fetch_book_page_chapter_soup()` is shared by every per-book source (jpn.bible, wikisource): it fetches one page per book, splits it, and keeps only the current book. The splitter is passed in because the boundary differs — jpn.bible has `main.book > div[id]`, wikisource has chapter *headings* with no wrapping element.
+- On wikisource a `<p>` may carry several `<sup>`: consecutive markers mean the source set those verses as one unit (69 places, e.g. Genesis 24:29-30). Reading only the first loses Genesis 24:30 and the book comes back one verse short.
+- wikisource chapter headings are Chinese numerals and the source is **not consistent** above one hundred: 110 is `一百一十` but 111 is `一百十一`. `_parse_chinese_numeral()` therefore only reads, never writes, and the chapter URL fragment is the arabic number — a cache key, not a page anchor. Dropping `零` turns `第一百零一篇` into 100 and silently overwrites nine Psalms.
+- A `<sup>` on wikisource is only a verse number when it is **digits**. The others are cross-reference markers written in Suzhou numerals (〡〢〣, 289 of them in 16 NT books); treating them as verse numbers cuts the verse in half there. No `sup` text is ever body text.
+- A psalm superscription on wikisource sits inside verse 1 wrapped in `<small>`, so unlike RVR1909 it **can** be separated and is not stored (116 Psalms). The rule needs both halves — Psalms only, and the `<small>` must not open with `〈` — or the same code deletes the translator's notes that open verse 1 elsewhere (Genesis 4:1 `〈就是得的意思〉`). Those notes are kept: 997 verses carry one.
+- wikisource verse text is accumulated **per paragraph**, never across paragraphs. Every book page ends with a public-domain licence box in its own `<p>`, after the last chapter heading; accumulating past the paragraph appends it to that book's final verse in all 66 books, and verse counts stay correct.
+- The four verses WEB leaves untranslated (Luke 17:36, Acts 8:37, 15:34, 24:7) are stored as `OMITTED_VERSE_TEXT` (`(omitted)`) rather than skipped, so contiguous verse numbering stays an invariant and any real gap reads as a scrape failure. The marker is written **only** when the span holds a `sup.footnote` and no body text — never for an arbitrarily empty span, or a DOM change would quietly fill the DB with placeholders instead of failing.
+- `CJK_JOIN_PATTERN` strips the block-join space when **both** sides are CJK: Japanese and Chinese write no spaces between words, so the separator Spanish and English require corrupts them instead (measured on jpnm as 49% of sampled verses). Hangul is deliberately outside `CJK_RANGES` — Korean does space its words, and widening the range there repeats the bskorea particle bug in reverse. The test suite guards both directions.
+- eBible's spablm omits **the same four verses** and needs the same treatment, which is why `EBIBLE_FOOTNOTE_SELECTOR` is separate from `EBIBLE_REMOVABLE_SELECTOR`: removal happens in two passes because stripping `a.notemark` first would destroy the only evidence that the empty verse was intentional. spaRV1909 carries all four as real text and must stay free of markers — check both translations after touching this.
+- A deleted footnote marker leaves **one space when there is a letter on both sides**. fraLSG sets 189 markers between two words with no space (`<span class="wj">et</span><a class="notemark">…</a><span class="wj">on</span>`, mostly at `span.wj` edges in the Gospels); plain deletion stored `eton`, which no SQL check can find. The space is prefixed to the **next text node**, not put in place of the marker: the accumulator skips whitespace-only nodes, so a `" "` node would vanish and the words would still glue. Letters on both sides only — adding it unconditionally gives `terre .` and `l’ Éternel`. Across all of spablm the rule changes exactly one verse, Luke 4:18, which had been stored as `corazonesrotos`; that row was deleted and re-loaded, since missing-only inserts never correct it. RVR1909 and jpnm samples are unchanged.
+- **LSG1910 keeps the edition's own verse numbering**, which differs from KJV in 106 chapters: 62 Psalms whose title is verse 1 (51, 52, 54, 60 have a two-verse title) and 44 chapters in 20 books where the chapter boundary or verse division moves (Exodus 7–8, Job 38–41, Jonah 1–2, Mark 9–10 …). Every other translation here is effectively KJV-versified, so parallel display by `(book, chapter, verse)` misaligns there. Verify against the fixed chapter list in the design doc, not against KJV counts. A long LSG psalm title is a **numbered verse inside `div.q`**, unlike the unnumbered `div.d` superscription the other translations drop — removing it makes those chapters start at verse 2, and the loader then skips all 62.
+- fraLSG opens each book with a modern introduction (`div.ip`, `div.io`, `table`, …) **before** the first verse marker. The accumulator collects nothing before a marker, so it is dropped without a selector; keep it that way rather than listing the classes.
+- `_extract_verses_from_studybible_page()` is the **only parser that normalises Unicode**. 27% of Nestle 1904 as this source serves it is not NFC — U+0387 GREEK ANO TELEIA 2,359 times plus 21 deprecated *oxia* letters — and one of the oxia letters is in `Βίβλος`, the first word of Matthew 1:1. Stored raw, that verse does not match a normally typed search term while every automated check still passes. Normalising here rather than globally keeps the other ten translations (342,078 rows, all already NFC) off an unverified path, and keeps `check_translation_drift.py` correct because it re-parses through this same adapter.
+- **N1904 has verse-number gaps and no `(omitted)` markers, on purpose.** The source prints nothing where a critical text omits a verse, so there is no page evidence to justify a marker; filling the 15 gaps from a hardcoded list would put data in the DB the source never gave and would make a real parser failure indistinguishable from an edition difference. ASV is already stored the same way (16 gaps). Verify against the fixed KJV-diff list (17 missing, 2 extra), not against contiguity — and note Acts 19:41 and 2 Cor 13:14 leave **no** gap because the merge is at the chapter end.
+- `_build_studybible_url()` refuses `book_order < 40`. Nestle 1904 is New Testament only, and an Old Testament or past-the-end chapter answers **200 with an empty passage box**, not 404 — the generic chain then reads that page as two plausible verses starting at 1 (`John 1:1`, `Peter 3:5`), which walks straight past the "first verse must be 1" guard. That is also why `bible_book` holds 27 rows for this translation, not 66, and why chapter counts come from `KJV_CHAPTER_COUNTS` rather than probing.
+- The studybible container holds **no block elements** (measured across all 260 chapters: only `sup` and `a`), so unlike the eBible parser it inserts no block-boundary space. Verse numbers come from the marker's `title`, which also carries the chapter — the displayed number agrees in all 7,942 places, so the `title` is read for the chapter half, which is what makes the mixed-chapter guard possible.
 
 ### Adding a new source
 
@@ -89,7 +135,7 @@ In `scraper.py`:
 In `scrape_bible_to_db.py`:
 
 6. `resolve_default_entry_url()` / `_is_nkrv_translation_hint()` — entry URL resolution
-7. `TRANSLATION_SOURCE_REQUIREMENTS` — one row per translation, drives `validate_source_translation_compatibility()` in **both** directions (source must produce the translation, and the translation must come from that source). **Last line of defense against mis-loading**
+7. `TRANSLATION_SOURCE_REQUIREMENTS` — one row per translation, drives `validate_source_translation_compatibility()` in **both** directions (source must produce the translation, and the translation must come from that source). **Last line of defense against mis-loading**. The `version` token comes from `HolyBibleScraper.get_source_version()`, not from the URL query string: BibleGateway puts it in the query (`?version=ASV`) but eBible puts it in the path (`/spablm/`). When one source serves several translations, `_expected_translation_type()` returns the **first** matching row, so leaving `version` as `None` silently pins every translation of that source to whichever one is declared first.
 8. `resolve_book_code_for_source()` — per-source book identifier
 
 Skipping step 7 lets, for example, WEB text land under the KJV translation — expensive to undo.
@@ -99,7 +145,7 @@ Skipping step 7 lets, for example, WEB text land under the KJV translation — e
 - `.env` is loaded with `os.environ.setdefault()`, so **shell environment variables win**.
 - Translation resolution order: `BIBLE_TRANSLATION_ID` → lookup by (`BIBLE_TRANSLATION_TYPE`, `BIBLE_TRANSLATION_NAME`, `BIBLE_LANGUAGE_CODE`) → legacy default `translation_id=10`.
 - That **legacy fallback of 10 is a trap**: with no variables set, data is silently written to translation 10.
-- Entry URL comes from `KJV_ENTRY_URL` / `NKRV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL`. `BIBLE_LANGUAGE_CODE=en` no longer identifies a source on its own — with more than one English URL set, resolution raises rather than guessing. `BIBLE_TRANSLATION_ID` does **not** steer entry-URL selection, so an ID-only run can silently pick the wrong source; pass `BIBLE_TRANSLATION_TYPE` or `--entry-url`.
+- Entry URL comes from `KJV_ENTRY_URL` / `NKRV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` / `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` / `JPNMEB_ENTRY_URL` / `KOUGO_ENTRY_URL` / `CUVT_ENTRY_URL` / `CUVS_ENTRY_URL` / `N1904_ENTRY_URL` / `LSG1910_ENTRY_URL`. A language code no longer identifies a source on its own: `en` covers KJV/WEB/ASV, `es` covers RVR1909/SBLM, `ja` covers JPNMEB/KOUGO and `zh` covers CUVT/CUVS, so with more than one URL of that language set, resolution raises rather than guessing. `el` currently maps to N1904 alone. The text is Koine, not Modern Greek, but the DB registered it as `el` and its `language_code` CHECK admits `el`, not `grc` — so `BIBLE_LANGUAGE_CODE=grc` finds no translation. A Modern Greek translation added later would share `el` with N1904. `fr` maps to LSG1910 alone. `BIBLE_TRANSLATION_ID` does **not** steer entry-URL selection, so an ID-only run can silently pick the wrong source; pass `BIBLE_TRANSLATION_TYPE` or `--entry-url`.
 - Never hardcode DB credentials (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`).
 
 ### CLI argument constraints

@@ -1,6 +1,10 @@
+import re
+import unicodedata
+
+import pytest
 from bs4 import BeautifulSoup
 
-from scraper import HolyBibleScraper
+from scraper import BIBLEGATEWAY_BOOK_NAMES, OMITTED_VERSE_TEXT, HolyBibleScraper
 
 
 def test_parse_verses_with_regex_fallback() -> None:
@@ -582,8 +586,1134 @@ def test_parse_verses_from_biblegateway_handles_asv_chapter_without_verse_span()
     assert all(verse.text != "(omitted)" for verse in verses)
 
 
+EBIBLE_ENTRY_URL = "https://ebible.org/spaRV1909/GEN01.htm"
+
+EBIBLE_CHAPTER_HTML = """
+<ul class="tnav"><li><a href="index.htm">Génesis</a></li><li><a href="GEN02.htm">&gt;</a></li></ul>
+<div class="main">
+<div class="mt">Génesis</div><div class="chapterlabel" id="V0"> 1</div><div class="p">
+<span class="verse" id="V1">1&nbsp;</span>EN el principio crió Dios los cielos y la tierra.
+<span class="verse" id="V2">2&nbsp;</span>Y la tierra estaba desordenada y vacía.
+<span class="verse" id="V3">3&nbsp;</span>Y dijo Dios: Júntense las aguas que <span class="add">están</span> debajo de los cielos.
+</div>
+<ul class="tnav"><li><a href="index.htm">Génesis</a></li></ul>
+<div class="footnote"><hr></div>
+<div class="copyright"><p><a href="copyright.htm">Public Domain</a></p></div>
+</div>
+"""
+
+
+class FakeResponse:
+    """Minimal stand-in for requests.Response for encoding tests."""
+
+    def __init__(self, body: str, content_type: str, encoding: str | None) -> None:
+        self.content = body.encode("utf-8")
+        self.headers = {"Content-Type": content_type}
+        self.status_code = 200
+        self.encoding = encoding
+        self.apparent_encoding = "utf-8"
+
+    @property
+    def text(self) -> str:
+        return self.content.decode(self.encoding or "utf-8", errors="replace")
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+class FakeSession:
+    def __init__(self, response: FakeResponse) -> None:
+        self.response = response
+        self.headers: dict[str, str] = {}
+
+    def get(self, url: str, timeout: int | None = None) -> FakeResponse:
+        return self.response
+
+
+def _ebible_scraper() -> HolyBibleScraper:
+    scraper = HolyBibleScraper(entry_url=EBIBLE_ENTRY_URL)
+    # The constructor raises these to the politeness floor; drop them again so the
+    # unit tests do not sleep. Coverage for the floor itself lives in its own test.
+    scraper.sleep_min = 0.0
+    scraper.sleep_max = 0.0
+    return scraper
+
+
+def test_get_source_name_detects_ebible() -> None:
+    assert _ebible_scraper().get_source_name() == "ebible"
+
+
+def test_build_ebible_url_pads_chapter_per_book() -> None:
+    scraper = _ebible_scraper()
+
+    assert scraper._build_chapter_url(1, 1) == "https://ebible.org/spaRV1909/GEN01.htm"
+    assert scraper._build_chapter_url(1, 50) == "https://ebible.org/spaRV1909/GEN50.htm"
+    # Psalms has 150 chapters, so eBible pads it to three digits: PSA23.htm is a 404.
+    assert scraper._build_chapter_url(19, 23) == "https://ebible.org/spaRV1909/PSA023.htm"
+    assert scraper._build_chapter_url(19, 119) == "https://ebible.org/spaRV1909/PSA119.htm"
+    assert scraper._build_chapter_url(64, 1) == "https://ebible.org/spaRV1909/3JN01.htm"
+    assert scraper._build_chapter_url(66, 22) == "https://ebible.org/spaRV1909/REV22.htm"
+
+
+def test_build_ebible_url_inherits_translation_code_from_entry_url() -> None:
+    scraper = HolyBibleScraper(
+        entry_url="https://ebible.org/engwebp/GEN01.htm", sleep_min=0.0, sleep_max=0.0
+    )
+
+    assert scraper._build_chapter_url(1, 2) == "https://ebible.org/engwebp/GEN02.htm"
+
+
+def test_discover_ebible_chapter_urls_uses_canonical_count() -> None:
+    scraper = _ebible_scraper()
+
+    assert len(scraper.discover_chapter_urls_for_book(1)) == 50
+    assert len(scraper.discover_chapter_urls_for_book(19)) == 150
+    assert len(scraper.discover_chapter_urls_for_book(65)) == 1
+
+
+def test_ebible_source_applies_politeness_delay_floor() -> None:
+    scraper = HolyBibleScraper(entry_url=EBIBLE_ENTRY_URL)
+
+    assert scraper.sleep_min >= 1.0
+    assert scraper.sleep_max >= 2.0
+
+
+def test_parse_verses_from_ebible_page_accumulates_between_markers() -> None:
+    verses = _ebible_scraper().parse_verses_from_html(EBIBLE_CHAPTER_HTML)
+
+    assert [verse.verse_number for verse in verses] == [1, 2, 3]
+    assert verses[0].text == "EN el principio crió Dios los cielos y la tierra."
+    # The marker text must not leak into the body.
+    assert not verses[0].text.startswith("1")
+    # Supplied words are body text.
+    assert "están" in verses[2].text
+    # Navigation, book title and copyright must not appear.
+    assert all("Génesis" not in verse.text for verse in verses)
+    assert all("Public Domain" not in verse.text for verse in verses)
+
+
+def test_parse_verses_from_ebible_page_separates_block_boundaries() -> None:
+    # Defensive rule: no observed RV1909 chapter splits a verse across blocks, so this
+    # is the only coverage that the join inserts a space instead of gluing words.
+    html = """
+    <div class="main">
+      <div class="p"><span class="verse" id="V1">1&nbsp;</span>primera parte</div>
+      <div class="p">segunda parte</div>
+    </div>
+    """
+    verses = _ebible_scraper().parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert verses[0].text == "primera parte segunda parte"
+
+
+def test_parse_verses_from_ebible_page_drops_headings_between_verses() -> None:
+    # eBible renders acrostic titles (div.d) and speaker labels (div.sp) as blocks that
+    # carry no verse marker. Left in place they append to the PREVIOUS verse: Psalms 119
+    # leaked 20 headings and Song of Songs 1 leaked 7 before these were removed.
+    html = """
+    <div class="main">
+      <div class="chapterlabel" id="V0">119</div>
+      <div class="d">ALEF</div>
+      <div class="q"><span class="verse" id="V1">1&nbsp;</span>primera linea</div>
+      <div class="q2"><span class="verse" id="V2">2&nbsp;</span>segunda linea</div>
+      <div class="d">BET</div>
+      <div class="q"><span class="verse" id="V3">3&nbsp;</span>tercera linea</div>
+      <div class="sp">Amado</div>
+      <div class="q"><span class="verse" id="V4">4&nbsp;</span>cuarta linea</div>
+    </div>
+    """
+    verses = _ebible_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [1, 2, 3, 4]
+    assert verses[1].text == "segunda linea"
+    assert verses[2].text == "tercera linea"
+    assert all("ALEF" not in verse.text for verse in verses)
+    assert all("BET" not in verse.text for verse in verses)
+    assert all("Amado" not in verse.text for verse in verses)
+
+
+def test_parse_verses_from_ebible_page_drops_inline_footnote_popup() -> None:
+    # The footnote marker nests the note body in span.popup inside the verse text.
+    html = """
+    <div class="main">
+      <div class="p">
+        <span class="verse" id="V24">24&nbsp;</span>guardar el camino del arbol de la
+        vida<a href="#FN1" class="notemark">*<span class="popup">Nota al pie que no
+        pertenece al texto biblico.</span></a>
+      </div>
+      <div class="footnote"><p class="f" id="FN1"><span class="ft">Nota al pie.</span></p></div>
+    </div>
+    """
+    verses = _ebible_scraper().parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert verses[0].text.endswith("vida")
+    assert "Nota al pie" not in verses[0].text
+
+
+def test_parse_verses_from_ebible_page_keeps_words_of_jesus() -> None:
+    html = """
+    <div class="main">
+      <div class="p"><span class="verse" id="V17">17&nbsp;</span>Jesus les dijo:
+      <span class="wj">«Venid en pos de mi»</span>.</div>
+    </div>
+    """
+    verses = _ebible_scraper().parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert "Venid en pos de mi" in verses[0].text
+
+
+def test_parse_verses_from_ebible_page_joins_verse_across_blocks() -> None:
+    """A verse split over two blocks must join with exactly one space.
+
+    RV1909 puts a whole chapter in one div.p, so this path never ran there. spablm
+    splits prose into many div.p and poetry into div.q/div.q2, and Genesis 3:13 really
+    does straddle a block boundary.
+    """
+    html = """
+    <div class="main">
+      <div class="p"><span class="verse" id="V13">13&nbsp;</span>&#191;Qu&#233; es lo que has hecho?</div>
+      <div class="p">Y dijo la mujer.</div>
+      <div class="q"><span class="verse" id="V14">14&nbsp;</span>Maldita ser&#225;s</div>
+      <div class="q2">entre todas las bestias.</div>
+    </div>
+    """
+    verses = _ebible_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [13, 14]
+    assert verses[0].text == "¿Qué es lo que has hecho? Y dijo la mujer."
+    assert verses[1].text == "Maldita serás entre todas las bestias."
+
+
+def test_ebible_chapter_urls_follow_the_entry_url_translation_code() -> None:
+    """The translation code comes from the entry URL path, so spablm needs no new code."""
+    scraper = HolyBibleScraper(entry_url="https://ebible.org/spablm/GEN01.htm")
+    scraper.sleep_min = 0.0
+    scraper.sleep_max = 0.0
+
+    assert scraper.get_source_name() == "ebible"
+    assert scraper._build_ebible_url(1, 1) == "https://ebible.org/spablm/GEN01.htm"
+    # Psalms pads to three digits; PSA23.htm is a 404.
+    assert scraper._build_ebible_url(19, 23) == "https://ebible.org/spablm/PSA023.htm"
+    assert scraper._build_ebible_url(64, 1) == "https://ebible.org/spablm/3JN01.htm"
+
+
+def test_get_source_version_reads_ebible_code_from_path_and_others_from_query() -> None:
+    def version_for(url: str) -> str | None:
+        scraper = HolyBibleScraper(entry_url=url)
+        scraper.sleep_min = 0.0
+        scraper.sleep_max = 0.0
+        return scraper.get_source_version()
+
+    assert version_for("https://ebible.org/spaRV1909/GEN01.htm") == "spaRV1909"
+    assert version_for("https://ebible.org/spablm/GEN01.htm") == "spablm"
+    assert version_for("https://www.biblegateway.com/passage/?search=Genesis%201&version=ASV") == "ASV"
+    assert version_for("https://thekingsbible.com/Bible/1/1") is None
+
+
+def test_parse_verses_from_ebible_page_marks_footnote_only_verse_as_omitted() -> None:
+    """spablm drops the same verses WEB does, leaving the marker plus a footnote.
+
+    Recording them keeps verse numbering contiguous, so a real gap still reads as a
+    scrape failure rather than a translation choice.
+    """
+    html = """
+    <div class="main">
+      <div class="p"><span class="verse" id="V35">35&nbsp;</span>Dos moler&#225;n juntas.</div>
+      <div class="p"><span class="verse" id="V36">36&nbsp;</span><a href="#FN1" class="notemark">*<span
+        class="popup">Algunos manuscritos griegos a&#241;aden este vers&#237;culo.</span></a></div>
+      <div class="p"><span class="verse" id="V37">37&nbsp;</span>Ellos respondiendo.</div>
+    </div>
+    """
+    verses = _ebible_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [35, 36, 37]
+    assert verses[1].text == OMITTED_VERSE_TEXT
+    assert "manuscritos" not in verses[1].text
+
+
+def test_parse_verses_from_ebible_page_skips_empty_verse_without_footnote() -> None:
+    """No footnote means no evidence of an intentional omission: skip, do not mark.
+
+    Marking every empty span would let a DOM change quietly fill the DB with
+    placeholders instead of failing loudly.
+    """
+    html = """
+    <div class="main">
+      <div class="p"><span class="verse" id="V1">1&nbsp;</span>Primero.</div>
+      <div class="p"><span class="verse" id="V2">2&nbsp;</span></div>
+      <div class="p"><span class="verse" id="V3">3&nbsp;</span>Tercero.</div>
+    </div>
+    """
+    verses = _ebible_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [1, 3]
+
+
+def test_parse_verses_from_ebible_page_keeps_body_text_that_has_a_footnote() -> None:
+    """A footnote alongside real text must not trigger the omitted marker."""
+    html = """
+    <div class="main">
+      <div class="p"><span class="verse" id="V1">1&nbsp;</span>En el principio<a href="#FN1"
+        class="notemark">*<span class="popup">Nota del traductor.</span></a> Dios cre&#243;.</div>
+    </div>
+    """
+    verses = _ebible_scraper().parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert verses[0].text != OMITTED_VERSE_TEXT
+    assert "Nota del traductor" not in verses[0].text
+    assert "En el principio" in verses[0].text
+
+
+def _lsg_scraper() -> HolyBibleScraper:
+    return HolyBibleScraper(entry_url="https://ebible.org/fraLSG/GEN01.htm", sleep_min=0.0, sleep_max=0.0)
+
+
+def test_ebible_drops_a_second_level_major_heading() -> None:
+    """fraLSG Genesis 11 carries a major heading block between verses 9 and 10.
+
+    div.ms, div.mr, div.s and div.r were already dropped; div.ms2 was not, so the
+    accumulator appended "DEPUIS ABRAHAM JUSQU’À JOSEPH" to verse 9 (the only such verse
+    in the translation, and invisible to verse-count checks).
+    """
+    html = """
+    <div class="main"><div class='p'>
+    <span class="verse" id="V9">9&#160;</span>C’est pourquoi on l’appela du nom de Babel.   </div><div
+    class='ms'>LES ANCÊTRES DU PEUPLE D’ISRAËL  </div><div class='ms2'>DEPUIS ABRAHAM JUSQU’À JOSEPH  </div><div
+    class='mr'>Ch. 11:10 à 50. (És 51:1, 2.)  </div><div class='s'>Postérité de Sem </div> <div
+    class='r'>V. 10-32: cf. 1 Ch 1:17-27.  </div><div class='p'> <span class="verse" id="V10">10&#160;</span><a
+    href="#FN3" class="notemark">c<span class="popup">Ge 10:22, etc.</span></a>Voici la postérité de Sem.</div>
+    </div>
+    """
+    verses = _lsg_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [9, 10]
+    assert verses[0].text == "C’est pourquoi on l’appela du nom de Babel."
+    assert verses[1].text == "Voici la postérité de Sem."
+
+
+def test_ebible_keeps_a_space_where_a_note_marker_split_two_words() -> None:
+    """fraLSG sets 189 markers between two words with no space around them.
+
+    On screen the superscript separates the words; deleting it glued them into "eton"
+    (Matthew 5:15) and "Maisaprès" (Ezra 5:12), which no SQL check can find.
+    """
+    html = """
+    <div class="main"><div class='p'>
+    <span class="verse" id="V15">15&#160;</span><span class='wj'>et</span><a href="#FN10"
+    class="notemark">j<span class="popup">Mc 4:21. Lu 3:16; 11:33.</span></a><span class='wj'>on n’allume
+    pas une lampe.</span>   <span class="verse" id="V16">16&#160;</span><span class='it'>Mais</span><a
+    href="#FN11" class="notemark">b<span class="popup">2 Ch 36:16, 17, etc.</span></a><span class='it'>après
+    que nos pères</span> eurent irrité le Dieu des cieux.</div>
+    </div>
+    """
+    verses = _lsg_scraper().parse_verses_from_html(html)
+
+    assert [verse.text for verse in verses] == [
+        "et on n’allume pas une lampe.",
+        "Mais après que nos pères eurent irrité le Dieu des cieux.",
+    ]
+
+
+def test_ebible_adds_no_space_where_a_note_marker_touches_punctuation() -> None:
+    """The space goes in only between two letters.
+
+    Adding it unconditionally would put a space before punctuation ("terre .") and after
+    an elided article ("l’ Éternel"), and would change already-loaded eBible text.
+    """
+    html = """
+    <div class="main"><div class='p'>
+    <span class="verse" id="V1">1&#160;</span>Au commencement<a href="#FN1" class="notemark">a<span
+    class="popup">Job 38:4.</span></a>, Dieu créa les cieux et la terre<a href="#FN2" class="notemark">b<span
+    class="popup">Ps 33:6.</span></a>. Et l’<a href="#FN3" class="notemark">c<span
+    class="popup">Ps 124:8.</span></a>Éternel <a href="#FN4" class="notemark">d<span
+    class="popup">Jn 1:1.</span></a>parla.</div>
+    </div>
+    """
+    verses = _lsg_scraper().parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert verses[0].text == "Au commencement, Dieu créa les cieux et la terre. Et l’Éternel parla."
+
+
+def test_ebible_keeps_a_numbered_psalm_title() -> None:
+    """A long LSG psalm title is verse 1 itself, inside div.q after the V1 marker.
+
+    It is not the unnumbered div.d superscription that every translation here drops:
+    losing it would make the chapter start at verse 2, and the loader skips such a
+    chapter, so 62 psalms would silently go missing.
+    """
+    html = """
+    <div class="main">
+    <div class='chapterlabel' id="V0"> 3</div><div class='r'>2 S 15; 16. Ps 4; 5.  </div><div class='q'> <span
+    class="verse" id="V1">1&#160;</span>Psaume de David. A l’occasion de sa <a href="#FN1"
+    class="notemark">a<span class="popup">2 S 15:16, 17, 18.</span></a>fuite devant Absalom, son fils.   </div><div
+    class='b'> &#160; </div> <div class='q'> <span class="verse" id="V2">2&#160;</span>O Éternel, que mes
+    ennemis sont nombreux!  </div><div class='q'>Quelle multitude se lève contre moi!   </div>
+    </div>
+    """
+    verses = _lsg_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [1, 2]
+    assert verses[0].text == "Psaume de David. A l’occasion de sa fuite devant Absalom, son fils."
+    assert verses[1].text == "O Éternel, que mes ennemis sont nombreux! Quelle multitude se lève contre moi!"
+
+
+def test_ebible_keeps_selah_line() -> None:
+    """div.qs holds "— Pause." (Selah), which is printed text of the verse, not a heading."""
+    html = """
+    <div class="main">
+    <div class='q'> <span class="verse" id="V3">3&#160;</span>Combien qui disent à mon sujet:  </div><div
+    class='q'>Plus de salut pour lui auprès de Dieu! </div><div class='qs'>— Pause.</div>   <div class='q'> <span
+    class="verse" id="V4">4&#160;</span>Mais toi, ô Éternel! Tu es mon bouclier,  </div>
+    </div>
+    """
+    verses = _lsg_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [3, 4]
+    assert verses[0].text == "Combien qui disent à mon sujet: Plus de salut pour lui auprès de Dieu! — Pause."
+
+
+def test_ebible_ignores_a_book_introduction() -> None:
+    """fraLSG opens each book with a modern introduction before the first verse marker.
+
+    It is commentary, not 1910 text. The accumulator collects nothing before a marker,
+    and this pins that down now that a source actually carries such blocks.
+    """
+    html = """
+    <div class="main">
+    <div class='mt'>LA GENÈSE  </div><div class='imt'>INTRODUCTION À LA GENÈSE  </div><div class='ip'>Le titre du
+    premier livre de la Bible signifie «origine».  </div><div class='io'>Création du monde (1–3)</div><table><tr><td>
+    Plan</td></tr></table><div class='ie'></div>
+    <div class='ms'>LES TEMPS ANCIENS  </div><div class='chapterlabel' id="V0"> 1</div><div class='ms2'>DEPUIS LA
+    CRÉATION JUSQU’À ABRAHAM  </div><div class='mr'>Ch. 1 à 11: 9.  </div><div class='s'>Création du monde </div>
+    <div class='r'>V. 1: cf. Né 9:6.  </div><div class='p'> <span class="verse" id="V1">1&#160;</span>Au <a
+    href="#FN1" class="notemark">a<span class="popup">Job 38:4.</span></a>commencement, Dieu créa les cieux et
+    la terre.   </div>
+    </div>
+    """
+    verses = _lsg_scraper().parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert verses[0].text == "Au commencement, Dieu créa les cieux et la terre."
+
+
+def _jpnm_scraper() -> HolyBibleScraper:
+    scraper = HolyBibleScraper(entry_url="https://ebible.org/jpnm/GEN01.htm")
+    scraper.sleep_min = 0.0
+    scraper.sleep_max = 0.0
+    return scraper
+
+
+def test_parse_verses_from_ebible_page_joins_japanese_without_space() -> None:
+    """Japanese writes no spaces between words, so the block join must not add one.
+
+    The same separator is required for Spanish and English, which is why the rule is
+    conditioned on both sides being CJK rather than removed outright.
+    """
+    html = """
+    <div class="main">
+      <div class="q"><span class="verse" id="V1">1&nbsp;</span>主は私の羊飼い。</div>
+      <div class="q2">私は何も欠けることがない。</div>
+      <div class="p"><span class="verse" id="V2">2&nbsp;</span>したのか。」</div>
+      <div class="p">女は言った。</div>
+    </div>
+    """
+    verses = _jpnm_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [1, 2]
+    assert verses[0].text == "主は私の羊飼い。私は何も欠けることがない。"
+    assert verses[1].text == "したのか。」女は言った。"
+
+
+def test_parse_verses_from_ebible_page_keeps_space_between_latin_words() -> None:
+    """The Spanish/English block join still needs its space."""
+    html = """
+    <div class="main">
+      <div class="p"><span class="verse" id="V13">13&nbsp;</span>&#191;Qu&#233; has hecho?</div>
+      <div class="p">Y dijo la mujer.</div>
+    </div>
+    """
+    verses = _ebible_scraper().parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert verses[0].text == "¿Qué has hecho? Y dijo la mujer."
+
+
+def test_parse_verses_from_ebible_page_keeps_spaces_in_korean_text() -> None:
+    """Hangul must stay outside the CJK range: Korean separates its words with spaces.
+
+    Collapsing here would mirror the bskorea particle bug, turning '모세가 말하되'
+    into an unreadable run.
+    """
+    html = """
+    <div class="main">
+      <div class="p"><span class="verse" id="V1">1&nbsp;</span>모세가 말하되</div>
+      <div class="p">여호와께서 이르시니라</div>
+    </div>
+    """
+    verses = _ebible_scraper().parse_verses_from_html(html)
+
+    assert len(verses) == 1
+    assert verses[0].text == "모세가 말하되 여호와께서 이르시니라"
+
+
+def test_parse_verses_from_ebible_page_keeps_space_between_cjk_and_latin() -> None:
+    """Only CJK-to-CJK collapses; a Latin word embedded in Japanese keeps its spaces."""
+    html = """
+    <div class="main">
+      <div class="p"><span class="verse" id="V1">1&nbsp;</span>使徒 Paul は言った。</div>
+    </div>
+    """
+    verses = _jpnm_scraper().parse_verses_from_html(html)
+
+    assert verses[0].text == "使徒 Paul は言った。"
+
+
+def test_ebible_chapter_urls_follow_jpnm_translation_code() -> None:
+    scraper = _jpnm_scraper()
+
+    assert scraper.get_source_name() == "ebible"
+    assert scraper.get_source_version() == "jpnm"
+    assert scraper._build_ebible_url(1, 1) == "https://ebible.org/jpnm/GEN01.htm"
+    assert scraper._build_ebible_url(19, 23) == "https://ebible.org/jpnm/PSA023.htm"
+
+
+def test_ebible_parser_returns_empty_for_other_sources() -> None:
+    scraper = _ebible_scraper()
+    soup = BeautifulSoup("<div class='bible_read'><p>1 text</p></div>", "html.parser")
+
+    assert scraper._extract_verses_from_ebible_page(soup) == []
+
+
+def test_request_html_recovers_encoding_when_header_omits_charset() -> None:
+    scraper = _ebible_scraper()
+    response = FakeResponse("<p>JEHOVÁ es mi pastor</p>", "text/html", "ISO-8859-1")
+    scraper.session = FakeSession(response)
+
+    html = scraper._request_html("https://ebible.org/spaRV1909/PSA023.htm")
+
+    assert "JEHOVÁ" in html
+    assert response.encoding == "utf-8"
+
+
+def test_request_html_keeps_declared_charset_untouched() -> None:
+    scraper = _ebible_scraper()
+    response = FakeResponse("<p>ok</p>", "text/html; charset=UTF-8", "UTF-8")
+    scraper.session = FakeSession(response)
+
+    scraper._request_html("https://example.com/page.htm")
+
+    assert response.encoding == "UTF-8"
+
+
 def test_biblegateway_parser_returns_empty_for_other_sources() -> None:
     scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
     soup = BeautifulSoup("<div class='bible_read'><p>1 text</p></div>", "html.parser")
 
     assert scraper._extract_verses_from_biblegateway_passage(soup) == []
+
+
+JPNBIBLE_ENTRY_URL = "https://jpn.bible/kougo/gen#1"
+# One chapter as jpn.bible slices it out of the book page: prose verses keep the body
+# inside span.verse-content, and every kanji carries a furigana reading.
+JPNBIBLE_PROSE_CHAPTER_HTML = """
+<div id="1"><h2 class="chapter-title"><a href="#1">第一章</a></h2>
+<p>
+<span class="verse" id="1:1"><span class="verse-number"><a href="#1:1">1</a></span>
+<span class="verse-content">はじめに<ruby>神<rp>（</rp><rt>かみ</rt><rp>）</rp></ruby>は<ruby>天<rp>（</rp><rt>てん</rt><rp>）</rp></ruby>と<ruby>地<rp>（</rp><rt>ち</rt><rp>）</rp></ruby>とを<ruby>創造<rp>（</rp><rt>そうぞう</rt><rp>）</rp></ruby>された。</span></span>
+<span class="verse" id="1:2"><span class="verse-number"><a href="#1:2">2</a></span>
+<span class="verse-content"><ruby>地<rp>（</rp><rt>ち</rt><rp>）</rp></ruby>は<ruby>形<rp>（</rp><rt>かたち</rt><rp>）</rp></ruby>なく、むなしく。</span></span>
+</p></div>
+"""
+# Poetry: verse-content is empty and the body runs to an explicit end marker.
+JPNBIBLE_POETRY_CHAPTER_HTML = """
+<div id="3"><h2 class="chapter-title"><a href="#3">第三篇</a></h2>
+<p>
+<title type="psalm" canonical="true">ダビデの歌</title>
+<span class="lg"><span class="l"><span class="verse" id="3:1" data-s-id="3:1"><span class="verse-number"><a href="#3:1">1</a></span><span class="verse-content"/></span>主よ、わたしに敵する者の<br/></span>
+<span class="l">いかに多いことでしょう。<span class="verse" data-e-id="3:1"/><br/></span>
+<span class="l"><span class="verse" id="3:2" data-s-id="3:2"><span class="verse-number"><a href="#3:2">2</a></span><span class="verse-content"/></span>わたしについて言う者が多いのです。〔セラ<span class="verse" data-e-id="3:2"/><br/></span></span>
+</p></div>
+"""
+
+
+def _jpnbible_scraper() -> HolyBibleScraper:
+    return HolyBibleScraper(entry_url=JPNBIBLE_ENTRY_URL)
+
+
+def test_jpnbible_source_is_recognised() -> None:
+    scraper = _jpnbible_scraper()
+
+    assert scraper.get_source_name() == "jpnbible"
+    # The translation code lives in the path, not the query string.
+    assert scraper.get_source_version() == "kougo"
+    assert scraper.sleep_min >= 1.0
+
+
+def test_jpnbible_chapter_urls_carry_the_chapter_as_a_fragment() -> None:
+    scraper = _jpnbible_scraper()
+
+    assert scraper._build_chapter_url(1, 1) == "https://jpn.bible/kougo/gen#1"
+    assert scraper._build_chapter_url(19, 119) == "https://jpn.bible/kougo/ps#119"
+    # The slug table is not bible_book.book_key: /kougo/sng and /kougo/phm are 404.
+    assert scraper._build_chapter_url(22, 1) == "https://jpn.bible/kougo/song#1"
+    assert scraper._build_chapter_url(57, 1) == "https://jpn.bible/kougo/phlm#1"
+
+
+def test_discover_jpnbible_chapter_urls_uses_canonical_count() -> None:
+    scraper = _jpnbible_scraper()
+
+    assert len(scraper.discover_chapter_urls_for_book(1)) == 50
+    assert len(scraper.discover_chapter_urls_for_book(19)) == 150
+    assert len(scraper.discover_chapter_urls_for_book(65)) == 1
+
+
+def test_jpnbible_prose_chapter_drops_ruby_readings() -> None:
+    verses = _jpnbible_scraper().parse_verses_from_html(JPNBIBLE_PROSE_CHAPTER_HTML)
+
+    assert [verse.verse_number for verse in verses] == [1, 2]
+    # get_text() would already look clean here; the descendants walk would not.
+    assert verses[0].text == "はじめに神は天と地とを創造された。"
+    assert "かみ" not in verses[0].text
+    assert "（" not in verses[0].text
+    # The rendered marker is the verse number, never body text.
+    assert not verses[0].text.startswith("1")
+    # The chapter heading must not leak in.
+    assert all("第一章" not in verse.text for verse in verses)
+
+
+def test_jpnbible_poetry_chapter_accumulates_between_markers() -> None:
+    verses = _jpnbible_scraper().parse_verses_from_html(JPNBIBLE_POETRY_CHAPTER_HTML)
+
+    assert [verse.verse_number for verse in verses] == [1, 2]
+    # <br> boundaries must not leave a space between CJK characters.
+    assert verses[0].text == "主よ、わたしに敵する者のいかに多いことでしょう。"
+    assert verses[1].text.endswith("〔セラ")
+    # The psalm superscription is not stored, matching every other translation here.
+    assert all("ダビデの歌" not in verse.text for verse in verses)
+
+
+def test_jpnbible_merged_range_is_stored_at_every_number() -> None:
+    html = """
+    <div id="132">
+      <p><span class="verse" id="132:3 Ps.132.4 Ps.132.5"><span class="verse-number">5</span><span class="verse-content">わたしは主のために所を捜し出し</span></span>
+      <span class="verse" id="132:6"><span class="verse-number">6</span><span class="verse-content">見よ、われらはエフラタでそれを聞き</span></span></p>
+    </div>
+    """
+    verses = _jpnbible_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [3, 4, 5, 6]
+    # Reading only the first extra token would lose verse 5.
+    assert verses[0].text == verses[1].text == verses[2].text
+    assert verses[3].text.startswith("見よ")
+
+
+def test_jpnbible_split_verse_joins_in_suffix_order() -> None:
+    # Exodus 22 prints 3b before 3a, so document order reverses the sentence.
+    html = """
+    <div id="22">
+      <p><span class="verse" id="22:3!b"><span class="verse-number">3</span><span class="verse-content">彼は必ず償わなければならない。</span></span>
+      <span class="verse" id="22:2"><span class="verse-number">2</span><span class="verse-content">その人には血を流した罪はない。</span></span>
+      <span class="verse" id="22:3!a"><span class="verse-number">3</span><span class="verse-content">しかし日がのぼって後ならば、</span></span></p>
+    </div>
+    """
+    verses = _jpnbible_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [2, 3]
+    assert verses[1].text == "しかし日がのぼって後ならば、彼は必ず償わなければならない。"
+
+
+def test_jpnbible_moves_a_trailing_opening_bracket_to_the_next_verse() -> None:
+    html = """
+    <div id="17">
+      <p><span class="verse" id="17:20"><span class="verse-number">20</span><span class="verse-content">何もないであろう。〔</span></span>
+      <span class="verse" id="17:21"><span class="verse-number">21</span><span class="verse-content">追い出すことはできない〕」。</span></span></p>
+    </div>
+    """
+    verses = _jpnbible_scraper().parse_verses_from_html(html)
+
+    assert verses[0].text == "何もないであろう。"
+    assert verses[1].text == "〔追い出すことはできない〕」。"
+
+
+def test_jpnbible_ignores_an_implausible_range() -> None:
+    html = """
+    <div id="1">
+      <p><span class="verse" id="1:1 Gen.1.99"><span class="verse-number">1</span><span class="verse-content">本文</span></span></p>
+    </div>
+    """
+    verses = _jpnbible_scraper().parse_verses_from_html(html)
+
+    # Duplicating one verse across 99 numbers is worse than ignoring the range.
+    assert [verse.verse_number for verse in verses] == [1]
+
+
+def test_jpnbible_book_page_is_fetched_once_per_book() -> None:
+    scraper = _jpnbible_scraper()
+    requested: list[str] = []
+
+    def fake_request(url: str) -> str:
+        requested.append(url)
+        return '<main class="book">' + JPNBIBLE_PROSE_CHAPTER_HTML + "</main>"
+
+    scraper._request_html = fake_request  # type: ignore[assignment]
+
+    first = scraper.fetch_chapter_payload(1, 1)
+    second = scraper.fetch_chapter_payload(1, 1, chapter_url="https://jpn.bible/kougo/gen#1")
+
+    assert [verse.verse_number for verse in first.verses] == [1, 2]
+    assert second.verses == first.verses
+    # One page per book, and the fragment never reaches the HTTP layer.
+    assert requested == ["https://jpn.bible/kougo/gen"]
+
+
+def test_jpnbible_missing_chapter_yields_no_verses() -> None:
+    scraper = _jpnbible_scraper()
+    scraper._request_html = lambda url: '<main class="book"><div id="1"></div></main>'  # type: ignore[assignment]
+
+    payload = scraper.fetch_chapter_payload(1, 7)
+
+    # An absent chapter must be empty, not an exception: the empty-data guard skips it
+    # before anything is written.
+    assert payload.verses == []
+
+
+def test_jpnbible_parser_returns_empty_for_other_sources() -> None:
+    scraper = _jpnbible_scraper()
+
+    for html in (
+        "<div class='bible_read'><p>1 text</p></div>",
+        "<div class='main'><div class='p'><span class='verse' id='V1'>1 </span>texto</div></div>",
+        "<div id='contents'><p><span class='section'>1</span>本文</p></div>",
+    ):
+        assert scraper._extract_verses_from_jpnbible_page(BeautifulSoup(html, "html.parser")) == []
+
+
+def test_ebible_parser_returns_empty_for_a_jpnbible_page() -> None:
+    scraper = _ebible_scraper()
+    soup = BeautifulSoup(JPNBIBLE_PROSE_CHAPTER_HTML, "html.parser")
+
+    assert scraper._extract_verses_from_ebible_page(soup) == []
+
+
+def test_jpnbible_rejects_a_multi_chapter_page() -> None:
+    # _fetch_soup always slices one chapter out of the book page. If that ever broke,
+    # the accumulator would concatenate every chapter's verse 1 into a single verse 1
+    # and return a full, contiguous list - which no verse-count check would catch.
+    scraper = _jpnbible_scraper()
+    html = """
+    <main class="book">
+      <div id="1"><p><span class="verse" id="1:1"><span class="verse-number">1</span>
+      <span class="verse-content">第一章の一節</span></span></p></div>
+      <div id="2"><p><span class="verse" id="2:1"><span class="verse-number">1</span>
+      <span class="verse-content">第二章の一節</span></span></p></div>
+    </main>
+    """
+    soup = BeautifulSoup(html, "html.parser")
+
+    assert scraper._extract_verses_from_jpnbible_page(soup) == []
+
+
+def test_jpnbible_cache_is_replaced_when_the_book_changes() -> None:
+    # The other half of the cache contract: if the page-URL comparison were wrong, the
+    # second book would silently serve the first book's chapters.
+    scraper = _jpnbible_scraper()
+    requested: list[str] = []
+
+    def fake_request(url: str) -> str:
+        requested.append(url)
+        slug = url.rsplit("/", 1)[-1]
+        return (
+            '<main class="book"><div id="1"><p>'
+            '<span class="verse" id="1:1"><span class="verse-number">1</span>'
+            f'<span class="verse-content">{slug}の本文</span></span></p></div></main>'
+        )
+
+    scraper._request_html = fake_request  # type: ignore[assignment]
+
+    first = scraper.fetch_chapter_payload(1, 1)
+    second = scraper.fetch_chapter_payload(2, 1)
+
+    assert first.verses[0].text == "genの本文"
+    assert second.verses[0].text == "exodの本文"
+    assert requested == ["https://jpn.bible/kougo/gen", "https://jpn.bible/kougo/exod"]
+
+
+def test_jpnbible_refetches_the_book_after_a_failed_request() -> None:
+    # A book-level retry must not reuse a half-built cache: the failed request never
+    # assigns one, so the next attempt fetches the page again.
+    scraper = _jpnbible_scraper()
+    attempts: list[str] = []
+
+    def flaky_request(url: str) -> str:
+        attempts.append(url)
+        if len(attempts) == 1:
+            raise RuntimeError("boom")
+        return '<main class="book">' + JPNBIBLE_PROSE_CHAPTER_HTML + "</main>"
+
+    scraper._request_html = flaky_request  # type: ignore[assignment]
+
+    try:
+        scraper.fetch_chapter_payload(1, 1)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    payload = scraper.fetch_chapter_payload(1, 1)
+
+    assert [verse.verse_number for verse in payload.verses] == [1, 2]
+    assert attempts == ["https://jpn.bible/kougo/gen", "https://jpn.bible/kougo/gen"]
+
+
+WIKISOURCE_ENTRY_URL = (
+    "https://zh.wikisource.org/zh-hant/%E8%81%96%E7%B6%93_(%E5%92%8C%E5%90%88%E6%9C%AC)"
+    "/%E5%89%B5%E4%B8%96%E8%A8%98#1"
+)
+# One chapter as _split_wikisource_book slices it: the heading travels with the slice,
+# verse numbers sit in <sup> inside a span whose id is "chapter:verse".
+WIKISOURCE_CHAPTER_HTML = """
+<h2 id="第一章">第一章</h2>
+<p><span id="1:1" style="color:#ff0000;"><sup>1</sup></span>起初　神創造天地。</p>
+<p><span id="1:2" style="color:#ff0000;"><sup>2</sup></span>地是空虛混沌．淵面黑暗。</p>
+"""
+
+
+def _wikisource_scraper() -> HolyBibleScraper:
+    return HolyBibleScraper(entry_url=WIKISOURCE_ENTRY_URL)
+
+
+def test_wikisource_source_is_recognised() -> None:
+    scraper = _wikisource_scraper()
+
+    assert scraper.get_source_name() == "wikisource"
+    # The script variant is the version token; without it the two Chinese translations
+    # would be indistinguishable to the source/translation check.
+    assert scraper.get_source_version() == "zh-hant"
+    assert scraper.sleep_min >= 1.0
+
+
+def test_wikisource_reads_chinese_numerals() -> None:
+    read = HolyBibleScraper._parse_chinese_numeral
+
+    assert read("三") == 3
+    assert read("十九") == 19
+    assert read("二十一") == 21
+    # 零 must not be dropped: 第一百零一篇 would collide with 第一百篇 and overwrite it.
+    assert read("一百零一") == 101
+    assert read("一百五十") == 150
+    # The source writes the tens digit above one hundred inconsistently.
+    assert read("一百一十") == 110
+    assert read("一百十一") == 111
+
+
+def test_wikisource_splits_book_page_by_chapter_heading() -> None:
+    html = """
+    <div class="mw-parser-output">
+      <h2 id="第一篇">第一篇</h2>
+      <p><span id="1:1"><sup>1</sup></span>第一篇の一節</p>
+      <h2 id="詩篇卷二">詩篇卷二</h2>
+      <p><span id="1:2"><sup>2</sup></span>卷 제목 뒤 문단은 앞 장에 남는다</p>
+      <h2 id="第二篇">第二篇</h2>
+      <p><span id="2:1"><sup>1</sup></span>第二篇の一節</p>
+    </div>
+    """
+    chapters = HolyBibleScraper._split_wikisource_book(html)
+
+    # 詩篇卷N is a section title, not a chapter.
+    assert sorted(chapters) == ["1", "2"]
+    assert "第一篇の一節" in chapters["1"]
+    assert "앞 장에 남는다" in chapters["1"]
+    assert "第二篇の一節" in chapters["2"]
+
+
+def test_wikisource_parses_verses() -> None:
+    verses = _wikisource_scraper().parse_verses_from_html(WIKISOURCE_CHAPTER_HTML)
+
+    assert [verse.verse_number for verse in verses] == [1, 2]
+    # 敬空 (U+3000 before the divine name) is folded away like any other separator.
+    assert verses[0].text == "起初神創造天地。"
+    assert not verses[0].text.startswith("1")
+    assert all("第一章" not in verse.text for verse in verses)
+
+
+def test_wikisource_merged_markers_cover_the_whole_range() -> None:
+    html = """
+    <h2 id="第二十四章">第二十四章</h2>
+    <p><span id="24:29"><sup>29</sup></span><sup>30</sup>利百加有一個哥哥。</p>
+    <p><span id="24:31"><sup>31</sup></span>便對他說。</p>
+    """
+    verses = _wikisource_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [29, 30, 31]
+    assert verses[0].text == verses[1].text
+    assert verses[2].text.startswith("便對他說")
+
+
+def test_wikisource_ignores_crossref_markers() -> None:
+    # Cross-reference markers are Suzhou numerals; reading them as verse numbers would
+    # cut the verse in half, and their text must never reach the body.
+    html = """
+    <h2 id="第一章">第一章</h2>
+    <p><span id="1:23"><sup>23</sup></span>說、『<sup><a href="#1a">〡</a></sup>必有童女、懷孕生子。』</p>
+    <dl><dd><span id="1a"></span><sup>〡</sup><a href="/wiki/x">賽七 〡〤</a></dd></dl>
+    """
+    verses = _wikisource_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [23]
+    assert verses[0].text == "說、『必有童女、懷孕生子。』"
+    assert "賽七" not in verses[0].text
+
+
+def test_wikisource_drops_psalm_superscription() -> None:
+    html = """
+    <h2 id="第二十三篇">第二十三篇</h2>
+    <p><span id="23:1"><sup>1</sup></span><small>大衞的詩。</small>耶和華是我的牧者。</p>
+    """
+    verses = _wikisource_scraper().parse_verses_from_html(html)
+
+    # Every other translation here drops superscriptions; this source marks them, so it
+    # can follow the convention.
+    assert verses[0].text == "耶和華是我的牧者。"
+
+
+def test_wikisource_keeps_a_note_at_the_start_of_a_verse() -> None:
+    # Same markup, different meaning: outside Psalms (章, not 篇) a leading <small> is a
+    # translator's note. Genesis 4:1 opens with one.
+    html = """
+    <h2 id="第四章">第四章</h2>
+    <p><span id="4:1"><sup>1</sup></span><small>〈就是得的意思〉</small>便說、耶和華使我得了一個男子。</p>
+    """
+    verses = _wikisource_scraper().parse_verses_from_html(html)
+
+    assert verses[0].text.startswith("〈就是得的意思〉")
+
+
+def test_wikisource_keeps_a_bracketed_note_inside_a_psalm() -> None:
+    html = """
+    <h2 id="第十篇">第十篇</h2>
+    <p><span id="10:1"><sup>1</sup></span><small>〈或作登堦〉</small>耶和華阿、你為甚麼站在遠處。</p>
+    """
+    verses = _wikisource_scraper().parse_verses_from_html(html)
+
+    assert verses[0].text.startswith("〈或作登堦〉")
+
+
+def test_wikisource_ignores_the_licence_paragraph() -> None:
+    # The licence box sits after the last verse of every book. Accumulating past the
+    # paragraph would append it to that book's final verse in all 66 books.
+    html = """
+    <h2 id="第五十章">第五十章</h2>
+    <p><span id="50:26"><sup>26</sup></span>約瑟死了、正一百一十歲。</p>
+    <p>此作品在全世界都屬於公有領域，因為作者逝世已經超過100年。</p>
+    """
+    verses = _wikisource_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [26]
+    assert "公有領域" not in verses[0].text
+
+
+def test_wikisource_parser_returns_empty_for_other_sources() -> None:
+    scraper = _wikisource_scraper()
+
+    for html in (
+        "<div class='bible_read'><p>1 text</p></div>",
+        "<div class='main'><div class='p'><span class='verse' id='V1'>1 </span>texto</div></div>",
+        "<div id='1'><p><span class='verse' id='1:1'><span class='verse-content'>本文</span></span></p></div>",
+    ):
+        assert scraper._extract_verses_from_wikisource_page(BeautifulSoup(html, "html.parser")) == []
+
+
+def test_wikisource_chapter_urls_use_an_arabic_fragment() -> None:
+    scraper = _wikisource_scraper()
+    url = scraper._build_chapter_url(19, 119)
+
+    # The heading numerals are irregular, so the fragment is the arabic number and is
+    # only a cache key - _split_wikisource_book keys chapters the same way.
+    assert url.endswith("#119")
+    assert "zh-hant" in url
+    assert len(scraper.discover_chapter_urls_for_book(19)) == 150
+
+
+def test_wikisource_rejects_a_multi_chapter_page() -> None:
+    # _fetch_soup always slices one chapter out of the book page. Handed the whole book,
+    # the accumulator would return a plausible contiguous list built from every
+    # chapter's opening verses - the same trap the jpn.bible parser guards against.
+    html = """
+    <h2 id="第一章">第一章</h2>
+    <p><span id="1:1"><sup>1</sup></span>第一章の一節</p>
+    <h2 id="第二章">第二章</h2>
+    <p><span id="2:1"><sup>1</sup></span>第二章の一節</p>
+    """
+    scraper = _wikisource_scraper()
+
+    assert scraper._extract_verses_from_wikisource_page(BeautifulSoup(html, "html.parser")) == []
+
+
+STUDYBIBLE_ENTRY_URL = "https://studybible.info/Nestle/Matthew%201"
+# One chapter as the source serves it: a single div.passage holding the version link and
+# then bare text between sup > a.verse_ref markers. There are no block elements inside.
+STUDYBIBLE_CHAPTER_HTML = """
+<div class="passage row Nestle">Nestle<sup><a class="version_info" href="/version/Nestle">(i)</a></sup>
+<sup><a class="verse_ref Nestle" href="/Nestle/Matthew%201:1" title="Matthew 1:1 Nestle">1</a></sup>
+Βίβλος γενέσεως.
+<sup><a class="verse_ref Nestle" href="/Nestle/Matthew%201:2" title="Matthew 1:2 Nestle">2</a></sup>
+Ἀβραὰμ ἐγέννησεν.
+</div>
+"""
+
+
+def _studybible_scraper() -> HolyBibleScraper:
+    return HolyBibleScraper(entry_url=STUDYBIBLE_ENTRY_URL)
+
+
+def test_studybible_source_is_recognised() -> None:
+    scraper = _studybible_scraper()
+
+    assert scraper.get_source_name() == "studybible"
+    # The version token is the first path segment; this host serves more than sixty
+    # translations, so without it every one of them would validate as N1904.
+    assert scraper.get_source_version() == "Nestle"
+    assert scraper.sleep_min >= 1.0
+
+
+def test_studybible_parses_verses() -> None:
+    verses = _studybible_scraper().parse_verses_from_html(STUDYBIBLE_CHAPTER_HTML)
+
+    assert [verse.verse_number for verse in verses] == [1, 2]
+    assert verses[0].text == "Βίβλος γενέσεως."
+    assert not verses[0].text.startswith("1")
+
+
+def test_studybible_drops_the_version_link() -> None:
+    # "Nestle" and the "(i)" link sit before the first marker, so accumulating between
+    # markers drops them; a Latin letter anywhere in the text means that broke.
+    verses = _studybible_scraper().parse_verses_from_html(STUDYBIBLE_CHAPTER_HTML)
+
+    assert all(not re.search(r"[A-Za-z]", verse.text) for verse in verses)
+
+
+def test_studybible_normalises_to_nfc() -> None:
+    # 27% of this source is not NFC. The codepoints below are spelled out because their
+    # NFC results are visually identical: retyping them by hand silently voids the test.
+    OXIA_IOTA = "ί"          # NFC -> U+03AF, the iota a keyboard produces
+    OXIA_ALPHA = "ά"         # NFC -> U+03AC
+    ANO_TELEIA = "·"         # NFC -> U+00B7 MIDDLE DOT
+    html = (
+        '<div class="passage row Nestle">'
+        '<sup><a class="verse_ref Nestle" title="Matthew 1:1 Nestle">1</a></sup>'
+        f"Β{OXIA_IOTA}βλος γενέσεως"
+        f"{ANO_TELEIA} Ἀβρ{OXIA_ALPHA}μ."
+        "</div>"
+    )
+
+    verses = _studybible_scraper().parse_verses_from_html(html)
+
+    # Matthew 1:1 really opens with an oxia iota, so stored as-is the first verse of the
+    # New Testament would not match a normally typed "Βίβλος".
+    assert verses[0].text.startswith("Βίβλος")
+    assert OXIA_IOTA not in verses[0].text
+    assert OXIA_ALPHA not in verses[0].text
+    assert ANO_TELEIA not in verses[0].text
+    assert "·" in verses[0].text
+    assert unicodedata.normalize("NFC", verses[0].text) == verses[0].text
+
+
+def test_studybible_keeps_editorial_brackets() -> None:
+    # Nestle's own sigla: [[ ]] for very early interpolations, < > where ancient
+    # authority is in part wanting. They open and close in different verses, so neither
+    # verse is balanced on its own.
+    html = """
+    <div class="passage row Nestle">
+    <sup><a class="verse_ref Nestle" title="Mark 16:9 Nestle">9</a></sup> [[Ἀναστὰς δὲ.
+    <sup><a class="verse_ref Nestle" title="Mark 16:20 Nestle">20</a></sup> ἐκεῖνοι δὲ.]]
+    <sup><a class="verse_ref Nestle" title="Mark 16:21 Nestle">21</a></sup> <Υἱοῦ Θεοῦ>.
+    </div>
+    """
+    verses = _studybible_scraper().parse_verses_from_html(html)
+
+    assert verses[0].text.startswith("[[")
+    assert verses[1].text.endswith("]]")
+    assert verses[2].text == "<Υἱοῦ Θεοῦ>."
+
+
+def test_studybible_leaves_a_numbering_gap_alone() -> None:
+    # The source prints nothing at all where it omits a verse, so there is no evidence to
+    # justify an OMITTED_VERSE_TEXT marker. 14 chapters look like this; ASV is already
+    # stored the same way.
+    html = """
+    <div class="passage row Nestle">
+    <sup><a class="verse_ref Nestle" title="Matthew 17:20 Nestle">20</a></sup> ἐὰν ἔχητε.
+    <sup><a class="verse_ref Nestle" title="Matthew 17:22 Nestle">22</a></sup> Συστρεφομένων δὲ.
+    </div>
+    """
+    verses = _studybible_scraper().parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [20, 22]
+    assert all(verse.text != OMITTED_VERSE_TEXT for verse in verses)
+
+
+def test_studybible_rejects_a_page_that_mixes_chapters() -> None:
+    html = """
+    <div class="passage row Nestle">
+    <sup><a class="verse_ref Nestle" title="Matthew 1:1 Nestle">1</a></sup> α.
+    <sup><a class="verse_ref Nestle" title="Matthew 2:1 Nestle">1</a></sup> β.
+    </div>
+    """
+    scraper = _studybible_scraper()
+
+    assert scraper._extract_verses_from_studybible_page(BeautifulSoup(html, "html.parser")) == []
+
+
+def test_studybible_returns_empty_for_a_book_the_edition_lacks() -> None:
+    # An Old Testament or out-of-range chapter answers 200 with an empty passage box
+    # rather than 404, which is why _build_studybible_url refuses those book orders.
+    html = '<div class="passage row Nestle">Nestle<sup><a class="version_info">(i)</a></sup></div>'
+    scraper = _studybible_scraper()
+
+    assert scraper._extract_verses_from_studybible_page(BeautifulSoup(html, "html.parser")) == []
+
+
+def test_studybible_parser_returns_empty_for_other_sources() -> None:
+    scraper = _studybible_scraper()
+
+    for html in (
+        "<div class='bible_read'><p>1 text</p></div>",
+        "<div class='main'><div class='p'><span class='verse' id='V1'>1 </span>texto</div></div>",
+        "<div id='1'><p><span class='verse' id='1:1'><span class='verse-content'>本文</span></span></p></div>",
+        WIKISOURCE_CHAPTER_HTML,
+        # Same site, different translation: the container class must gate the parser.
+        "<div class='passage row KJV'><sup><a class='verse_ref KJV'"
+        " title='Matthew 1:1 KJV'>1</a></sup> The book</div>",
+    ):
+        assert scraper._extract_verses_from_studybible_page(BeautifulSoup(html, "html.parser")) == []
+
+
+def test_studybible_chapter_urls_cover_the_new_testament_only() -> None:
+    scraper = _studybible_scraper()
+
+    assert scraper._build_chapter_url(46, 13) == "https://studybible.info/Nestle/1%20Corinthians%2013"
+    assert len(scraper.discover_chapter_urls_for_book(40)) == 28
+    assert len(scraper.discover_chapter_urls_for_book(66)) == 22
+    # Old Testament books are not merely skipped, they are refused: the source answers
+    # 200 for them and the generic chain reads that page as two verses starting at 1.
+    assert scraper.discover_chapter_urls_for_book(1) == {}
+    for book_order in (1, 39, 67):
+        with pytest.raises(ValueError):
+            scraper._build_studybible_url(book_order, 1)
+
+
+def test_studybible_book_names_come_from_the_shared_table() -> None:
+    # The 27 New Testament names this source uses are the ones BibleGateway uses, so no
+    # second book-name table is introduced.
+    assert BIBLEGATEWAY_BOOK_NAMES[39:66] == (
+        "Matthew", "Mark", "Luke", "John", "Acts", "Romans", "1 Corinthians",
+        "2 Corinthians", "Galatians", "Ephesians", "Philippians", "Colossians",
+        "1 Thessalonians", "2 Thessalonians", "1 Timothy", "2 Timothy", "Titus",
+        "Philemon", "Hebrews", "James", "1 Peter", "2 Peter", "1 John", "2 John",
+        "3 John", "Jude", "Revelation",
+    )

@@ -4,6 +4,7 @@ import logging
 import random
 import re
 import time
+import unicodedata
 from collections import Counter, deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -12,7 +13,7 @@ from typing import Iterable
 from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlparse, urlunparse
 
 import requests
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup, NavigableString, PageElement, Tag
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_random_exponential
 
 from models import ChapterPayload, Verse
@@ -44,7 +45,8 @@ DEFAULT_USER_AGENT = (
 )
 MIN_VERSE_NUMBER = 1
 MAX_VERSE_NUMBER = 200
-BSKOREA_BOOK_CODES: tuple[str, ...] = (
+# USFM book codes, shared by bskorea (lowercase) and ebible.org (uppercase).
+USFM_BOOK_CODES: tuple[str, ...] = (
     "gen", "exo", "lev", "num", "deu", "jos", "jdg", "rut", "1sa", "2sa", "1ki", "2ki",
     "1ch", "2ch", "ezr", "neh", "est", "job", "psa", "pro", "ecc", "sng", "isa", "jer",
     "lam", "ezk", "dan", "hos", "jol", "amo", "oba", "jon", "mic", "nam", "hab", "zep",
@@ -88,7 +90,128 @@ BIBLEGATEWAY_INLINE_REMOVABLE_SELECTOR = (
 # exists but holds only a footnote marker. Recorded explicitly so a gap in the stored
 # verse numbers always means a scrape failure, never a translation choice. Mirrors the
 # "(없음)" convention Korean editions use for the same verses.
-BIBLEGATEWAY_OMITTED_VERSE_TEXT = "(omitted)"
+OMITTED_VERSE_TEXT = "(omitted)"
+BIBLEGATEWAY_OMITTED_VERSE_TEXT = OMITTED_VERSE_TEXT
+DEFAULT_EBIBLE_RV1909_ENTRY_URL = "https://ebible.org/spaRV1909/GEN01.htm"
+DEFAULT_EBIBLE_SBLM_ENTRY_URL = "https://ebible.org/spablm/GEN01.htm"
+DEFAULT_EBIBLE_JPNMEB_ENTRY_URL = "https://ebible.org/jpnm/GEN01.htm"
+DEFAULT_EBIBLE_LSG1910_ENTRY_URL = "https://ebible.org/fraLSG/GEN01.htm"
+DEFAULT_EBIBLE_TRANSLATION_CODE = "spaRV1909"
+# Verse markers are `<span class="verse" id="V12">`; the chapter label uses V0.
+EBIBLE_VERSE_ID_PATTERN = re.compile(r"^V(\d{1,3})$")
+# Everything in div.main that is not scripture. `ul.tnav` matters most: it holds the
+# book name and prev/next links. The USFM heading/note classes were not observed in
+# RV1909 but are emitted by the same renderer for other translations.
+EBIBLE_REMOVABLE_SELECTOR = (
+    "ul.tnav, div.mt, div.mt1, div.mt2, div.mt3, "
+    # fraLSG puts a second-level major heading between Genesis 11:9 and 11:10; without
+    # div.ms2 it lands on 11:9 as "… toute la terre. DEPUIS ABRAHAM JUSQU’À JOSEPH".
+    "div.ms, div.ms1, div.ms2, div.ms3, div.s, div.s1, div.s2, div.sr, div.mr, div.r, "
+    # Headings that appear BETWEEN verses: a psalm/acrostic title (div.d, div.qa) or a
+    # speaker label (div.sp). They carry no verse marker, so the accumulator folds them
+    # into the surrounding verse (spablm Psalms 119 leaks 21, Song of Songs 1 leaks 8).
+    "div.d, div.qa, div.qd, div.sp, "
+    "div.chapterlabel, div.footnote, div.copyright, div.navbar"
+)
+# Removed in a second pass, after omitted verses are detected: an empty verse is only
+# recognisable while its footnote marker is still in the tree. The marker nests the note
+# body in span.popup, inside the verse text, so both go together.
+EBIBLE_FOOTNOTE_SELECTOR = "a.notemark, span.notemark, span.footnote, span.crossref"
+EBIBLE_BLOCK_TAGS = frozenset({"div", "p", "li", "table", "tr", "blockquote"})
+# ebible.org declares no Crawl-delay, so this is a self-imposed politeness floor for a
+# nonprofit static host rather than a site requirement. A full 66-book load stays well
+# under an hour at this rate.
+EBIBLE_MIN_DELAY_SECONDS = 1.0
+# --- jpn.bible (口語訳聖書 1954/1955) -----------------------------------------
+DEFAULT_JPNBIBLE_KOUGO_ENTRY_URL = "https://jpn.bible/kougo/gen#1"
+DEFAULT_JPNBIBLE_TRANSLATION_CODE = "kougo"
+# jpn.bible serves one page per BOOK and has no per-chapter URL (/kougo/ps/3,
+# /kougo/ps3 and /kougo/ps.3 are all 404), so the chapter travels in the fragment and
+# the page is split once per book. Refetching per chapter would pull 1.8MB x 150 for
+# Psalms alone.
+JPNBIBLE_BOOK_SLUGS: tuple[str, ...] = (
+    "gen", "exod", "lev", "num", "deut", "josh", "judg", "ruth", "1sam", "2sam",
+    "1kgs", "2kgs", "1chr", "2chr", "ezra", "neh", "esth", "job", "ps", "prov",
+    "eccl", "song", "isa", "jer", "lam", "ezek", "dan", "hos", "joel", "amos",
+    "obad", "jonah", "mic", "nah", "hab", "zeph", "hag", "zech", "mal", "matt",
+    "mark", "luke", "john", "acts", "rom", "1cor", "2cor", "gal", "eph", "phil",
+    "col", "1thess", "2thess", "1tim", "2tim", "titus", "phlm", "heb", "jas",
+    "1pet", "2pet", "1john", "2john", "3john", "jude", "rev",
+)
+# "3:16" starts a verse and "22:3!a" is one half of a split verse. A merged range lists
+# every covered verse as an extra OSIS token: id="132:3 Ps.132.4 Ps.132.5". Reading only
+# the first extra token loses Psalms 132:5.
+JPNBIBLE_VERSE_ID_PATTERN = re.compile(r"^(\d{1,3}):(\d{1,3})(?:!([ab]))?$")
+JPNBIBLE_OSIS_REF_PATTERN = re.compile(r"^[A-Za-z0-9]+\.(\d{1,3})\.(\d{1,3})$")
+# A range wider than this is a malformed id rather than real versification; duplicating
+# a verse across dozens of numbers is worse than ignoring the range.
+JPNBIBLE_MAX_RANGE_WIDTH = 10
+# rt/rp carry the furigana readings. bs4 keeps them out of get_text(), but RubyTextString
+# and RubyParenthesisString subclass NavigableString, so the descendants walk below would
+# otherwise fold 神（かみ） into the verse text - and get_text() would still look clean.
+# h1/h2 are the book and chapter headings; <title type="psalm"> is a psalm superscription,
+# which none of the other translations here store.
+JPNBIBLE_REMOVABLE_SELECTOR = "rt, rp, h1, h2, title"
+JPNBIBLE_BLOCK_TAGS = frozenset({"div", "p", "li", "br", "blockquote"})
+# The printed edition opens a bracket before the verse NUMBER of a disputed passage, so
+# the markup leaves it at the end of the previous verse (19 verses). Moving it to the
+# head of the next verse balances both and matches the second witness.
+JPNBIBLE_OPENING_BRACKETS = "〔（"
+# No Crawl-delay is declared; this is the same self-imposed floor used for ebible.org.
+JPNBIBLE_MIN_DELAY_SECONDS = 1.0
+# --- zh.wikisource 聖經 (和合本) 1919 -------------------------------------------
+DEFAULT_WIKISOURCE_CUV_ENTRY_URL = (
+    "https://zh.wikisource.org/zh-hant/%E8%81%96%E7%B6%93_(%E5%92%8C%E5%90%88%E6%9C%AC)"
+    "/%E5%89%B5%E4%B8%96%E8%A8%98#1"
+)
+DEFAULT_WIKISOURCE_VARIANT = "zh-hant"
+WIKISOURCE_PAGE_PREFIX = "聖經_(和合本)"
+# Book pages are titled in traditional script even when the text is requested in
+# simplified: /zh-hans/ converts the body, not the path.
+WIKISOURCE_BOOK_TITLES: tuple[str, ...] = (
+    "創世記", "出埃及記", "利未記", "民數記", "申命記", "約書亞記", "士師記", "路得記", "撒母耳記上", "撒母耳記下", "列王紀上",
+    "列王紀下", "歷代志上", "歷代志下", "以斯拉記", "尼希米記", "以斯帖記", "約伯記", "詩篇", "箴言", "傳道書", "雅歌", "以賽亞書",
+    "耶利米書", "耶利米哀歌", "以西結書", "但以理書", "何西阿書", "約珥書", "阿摩司書", "俄巴底亞書", "約拿書", "彌迦書", "那鴻書",
+    "哈巴谷書", "西番雅書", "哈該書", "撒迦利亞書", "瑪拉基書", "馬太福音", "馬可福音", "路加福音", "約翰福音", "使徒行傳", "羅馬書",
+    "哥林多前書", "哥林多後書", "加拉太書", "以弗所書", "腓立比書", "歌羅西書", "帖撒羅尼迦前書", "帖撒羅尼迦後書", "提摩太前書", "提摩太後書",
+    "提多書", "腓利門書", "希伯來書", "雅各書", "彼得前書", "彼得後書", "約翰一書", "約翰二書", "約翰三書", "猶大書", "啟示錄",
+)
+# Chapter headings are the only chapter boundary. Psalms uses 篇, everything else 章,
+# and the five 詩篇卷N section titles do not match this form, so they are skipped.
+WIKISOURCE_CHAPTER_PATTERN = re.compile(r"^第([一二三四五六七八九十百零〇\d]+)[章篇]$")
+# The 「編輯」 links and the table of contents are chrome; sup.reference is a wiki
+# footnote marker, absent today but cheap to guard against.
+WIKISOURCE_REMOVABLE_SELECTOR = "span.mw-editsection, table, style, sup.reference"
+# A psalm superscription sits inside verse 1, wrapped in <small>, e.g.
+# <sup>1</sup><small>大衞的詩。</small>耶和華是我的牧者…  Every other translation here
+# drops superscriptions; RVR1909 keeps them only because its source cannot separate
+# them. This one can, so it does not store them. The note test matters: outside Psalms
+# a leading <small> is a translator's note (창 4:1 〈就是得的意思〉), which is kept.
+WIKISOURCE_PSALM_BOOK_ORDER = 19
+WIKISOURCE_NOTE_OPENING_BRACKET = "〈"
+WIKISOURCE_VERSE_ID_PATTERN = re.compile(r"^(\d{1,3}):\d{1,3}$")
+WIKISOURCE_MIN_DELAY_SECONDS = 1.0
+# --- studybible.info Nestle 1904 Greek New Testament ----------------------------
+DEFAULT_STUDYBIBLE_N1904_ENTRY_URL = "https://studybible.info/Nestle/Matthew%201"
+DEFAULT_STUDYBIBLE_VERSION = "Nestle"
+# Nestle 1904 is a New Testament edition. An Old Testament or out-of-range chapter URL
+# answers 200 with an empty passage box rather than 404, and the generic chain then reads
+# that page as two plausible verses starting at 1, so nothing downstream would catch it.
+STUDYBIBLE_FIRST_NT_BOOK_ORDER = 40
+# Verse markers carry "Matthew 1:1 Nestle" in the title. The chapter half is what makes
+# the marker worth reading: the displayed number matches it in all 7,942 places.
+STUDYBIBLE_REF_PATTERN = re.compile(r"^(?P<book>.+?)\s(?P<chapter>\d{1,3}):(?P<verse>\d{1,3})$")
+# No Crawl-delay is declared for a generic agent; same self-imposed floor as ebible.org.
+STUDYBIBLE_MIN_DELAY_SECONDS = 1.0
+# Japanese and Chinese put no spaces between words, so the separator that joins a verse
+# split across blocks - required for Spanish and English - corrupts CJK text instead.
+# Hangul (U+AC00-D7A3) is deliberately excluded: Korean does space its words, and
+# collapsing there would repeat the bskorea particle-splitting bug in reverse.
+CJK_RANGES = "　-〿぀-ヿ㐀-䶿一-鿿＀-￯"
+# ASCII whitespace only. U+3000 sits inside CJK_RANGES and is content rather than a
+# separator; _normalize_text() has already folded it to a plain space by this point, so
+# widening this to \s would only make the loss harder to trace.
+CJK_JOIN_PATTERN = re.compile(rf"(?<=[{CJK_RANGES}])[ \t\r\n]+(?=[{CJK_RANGES}])")
 
 
 class RetryableHttpError(RuntimeError):
@@ -123,6 +246,18 @@ class HolyBibleScraper:
         if self._is_biblegateway_source():
             self.sleep_min = max(self.sleep_min, BIBLEGATEWAY_CRAWL_DELAY_SECONDS)
             self.sleep_max = max(self.sleep_max, BIBLEGATEWAY_CRAWL_DELAY_SECONDS + 3.0)
+        elif self._is_ebible_source():
+            self.sleep_min = max(self.sleep_min, EBIBLE_MIN_DELAY_SECONDS)
+            self.sleep_max = max(self.sleep_max, EBIBLE_MIN_DELAY_SECONDS + 1.0)
+        elif self._is_jpnbible_source():
+            self.sleep_min = max(self.sleep_min, JPNBIBLE_MIN_DELAY_SECONDS)
+            self.sleep_max = max(self.sleep_max, JPNBIBLE_MIN_DELAY_SECONDS + 1.0)
+        elif self._is_wikisource_source():
+            self.sleep_min = max(self.sleep_min, WIKISOURCE_MIN_DELAY_SECONDS)
+            self.sleep_max = max(self.sleep_max, WIKISOURCE_MIN_DELAY_SECONDS + 1.0)
+        elif self._is_studybible_source():
+            self.sleep_min = max(self.sleep_min, STUDYBIBLE_MIN_DELAY_SECONDS)
+            self.sleep_max = max(self.sleep_max, STUDYBIBLE_MIN_DELAY_SECONDS + 1.0)
 
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": DEFAULT_USER_AGENT})
@@ -131,6 +266,10 @@ class HolyBibleScraper:
         self._navigation_template: NavigationTemplate | None = None
         self._chapter_cache: dict[tuple[int, int], ChapterPayload] = {}
         self._chapter_url_cache: dict[int, dict[int, str]] = {}
+        # Only the book page being processed is kept, so the loop stays at one entry.
+        # Shared by every source whose pages are per-book (jpn.bible, wikisource).
+        self._book_page_url: str | None = None
+        self._book_page_chapters: dict[str, str] = {}
 
     def close(self) -> None:
         self.session.close()
@@ -142,7 +281,35 @@ class HolyBibleScraper:
             return "bskorea"
         if self._is_biblegateway_source():
             return "biblegateway"
+        if self._is_ebible_source():
+            return "ebible"
+        if self._is_jpnbible_source():
+            return "jpnbible"
+        if self._is_wikisource_source():
+            return "wikisource"
+        if self._is_studybible_source():
+            return "studybible"
         return "generic"
+
+    def get_source_version(self) -> str | None:
+        """
+        Version token identifying which translation this entry URL selects.
+
+        BibleGateway puts it in the query string (?version=WEB), but eBible puts it in
+        the path (/spaRV1909/, /spablm/). Reading only the query string would leave both
+        eBible translations indistinguishable, which silently defeats the source/
+        translation compatibility check once one source serves more than one translation.
+        """
+        if self._is_ebible_source():
+            return self._get_ebible_translation_code()
+        if self._is_jpnbible_source():
+            return self._get_jpnbible_translation_code()
+        if self._is_wikisource_source():
+            return self._get_wikisource_variant()
+        if self._is_studybible_source():
+            return self._get_studybible_version()
+        query = dict(parse_qsl(urlparse(self.entry_url or "").query, keep_blank_values=True))
+        return query.get("version")
 
     def parse_verses_from_html(self, html: str) -> list[Verse]:
         soup = BeautifulSoup(html, "html.parser")
@@ -172,6 +339,14 @@ class HolyBibleScraper:
         if response.status_code in (502, 503, 504):
             raise RetryableHttpError(f"Retryable status={response.status_code} url={url}")
         response.raise_for_status()
+
+        # requests falls back to ISO-8859-1 when Content-Type carries no charset,
+        # which mojibakes UTF-8 pages that declare the encoding only in a <meta>
+        # tag (ebible.org does exactly that). Sources that send a charset are
+        # left untouched.
+        if "charset=" not in (response.headers.get("Content-Type") or "").lower():
+            response.encoding = response.apparent_encoding or "utf-8"
+
         html = response.text
 
         # Some providers return HTTP 200 with a rate-limit/error body.
@@ -231,8 +406,113 @@ class HolyBibleScraper:
         )
 
     def _fetch_soup(self, url: str) -> BeautifulSoup:
+        if self._is_jpnbible_source():
+            return self._fetch_book_page_chapter_soup(url, self._split_jpnbible_book)
+        if self._is_wikisource_source():
+            return self._fetch_book_page_chapter_soup(url, self._split_wikisource_book)
         html = self._request_html(url)
         return BeautifulSoup(html, "html.parser")
+
+    def _fetch_book_page_chapter_soup(self, url: str, split) -> BeautifulSoup:
+        """
+        One HTTP request per book, then serve each chapter from the split page.
+
+        The fragment carries the chapter number, so the cache is keyed by the page URL
+        without it. Only the current book is kept: the loader is book-major, so the hit
+        rate is 100% and at most one page (1.8MB for Psalms) stays resident.
+
+        `split` returns {chapter key as a string: chapter HTML}, keyed to match the
+        fragment. An int key would make every lookup miss and every chapter come back
+        empty, which surfaces only as "book yielded no verses" once per book.
+        """
+        page_url, _, fragment = url.partition("#")
+        if self._book_page_url != page_url:
+            self._book_page_chapters = split(self._request_html(page_url))
+            self._book_page_url = page_url
+
+        return BeautifulSoup(self._book_page_chapters.get(fragment, ""), "html.parser")
+
+    @staticmethod
+    def _parse_chinese_numeral(value: str) -> int | None:
+        """
+        Chapter headings are written in Chinese numerals: 第三章, 第一百零一篇.
+
+        The source is not consistent about the tens digit above one hundred - 110 is
+        一百一十 while 111 is 一百十一 - so this only reads, never writes. Reading 零 as
+        nothing (100 instead of 101) silently merges nine Psalms into their neighbours.
+        """
+        if not value:
+            return None
+        if value.isdigit():
+            return int(value)
+
+        digits = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
+                  "六": 6, "七": 7, "八": 8, "九": 9}
+        total = 0
+        rest = value
+        if "百" in rest:
+            head, rest = rest.split("百", 1)
+            total += (digits.get(head, 1) if head else 1) * 100
+            rest = rest.lstrip("零〇")
+            if not rest:
+                return total
+        if "十" in rest:
+            head, tail = rest.split("十", 1)
+            total += (digits.get(head, 1) if head else 1) * 10
+            return total + (digits.get(tail, 0) if tail else 0)
+        return total + digits.get(rest, 0)
+
+    @classmethod
+    def _split_wikisource_book(cls, html: str) -> dict[str, str]:
+        """Split a book page into {chapter number as a string: chapter HTML}."""
+        soup = BeautifulSoup(html, "html.parser")
+        container = soup.select_one("div.mw-parser-output")
+        if container is None:
+            logger.warning("wikisource page has no div.mw-parser-output; chapter split is empty")
+            return {}
+
+        chapters: dict[str, str] = {}
+        current: str | None = None
+        parts: list[str] = []
+        for node in container.find_all(["h2", "h3", "p", "dl"], recursive=True):
+            if node.name in ("h2", "h3"):
+                match = WIKISOURCE_CHAPTER_PATTERN.match(node.get_text("", strip=True))
+                if match is None:
+                    # 詩篇卷N and other section titles are not chapters; the paragraphs
+                    # that follow still belong to the chapter already open.
+                    continue
+                if current is not None:
+                    chapters[current] = "".join(parts)
+                number = cls._parse_chinese_numeral(match.group(1))
+                current = str(number) if number else None
+                # The heading travels with the slice: 篇 marks Psalms, which is the only
+                # book whose verse 1 opens with a superscription.
+                parts = [str(node)]
+                continue
+            if current is not None:
+                parts.append(str(node))
+        if current is not None:
+            chapters[current] = "".join(parts)
+        return chapters
+
+    @staticmethod
+    def _split_jpnbible_book(html: str) -> dict[str, str]:
+        """Split a book page into {chapter id: chapter HTML}."""
+        soup = BeautifulSoup(html, "html.parser")
+        container = soup.select_one("main.book")
+        if container is None:
+            # Every chapter of this book will now parse to nothing and the book fails
+            # its empty-data guard. That is the right outcome, but it is only traceable
+            # to the page structure if it is said here.
+            logger.warning("jpn.bible page has no main.book container; chapter split is empty")
+            return {}
+
+        chapters: dict[str, str] = {}
+        for node in container.find_all("div", recursive=False):
+            chapter_id = (node.get("id") or "").strip()
+            if chapter_id.isdigit():
+                chapters[chapter_id] = str(node)
+        return chapters
 
     def _collect_candidate_urls(self) -> set[str]:
         """Crawl a small graph from entry URL and collect candidate scripture links."""
@@ -463,8 +743,8 @@ class HolyBibleScraper:
 
     @staticmethod
     def _get_bskorea_book_code(book_order: int) -> str | None:
-        if 1 <= book_order <= len(BSKOREA_BOOK_CODES):
-            return BSKOREA_BOOK_CODES[book_order - 1]
+        if 1 <= book_order <= len(USFM_BOOK_CODES):
+            return USFM_BOOK_CODES[book_order - 1]
         return None
 
     def _build_bskorea_url(
@@ -521,6 +801,95 @@ class HolyBibleScraper:
         search = quote(f"{book_name} {chapter_number}")
         return f"{base_url}?search={search}&version={quote(version)}"
 
+    def _is_ebible_source(self) -> bool:
+        return "ebible.org" in urlparse(self.entry_url or "").netloc.lower()
+
+    def _get_ebible_translation_code(self) -> str:
+        """First path segment of the entry URL, e.g. ".../spaRV1909/GEN01.htm"."""
+        segments = [part for part in urlparse(self.entry_url or "").path.split("/") if part]
+        return segments[0] if segments else DEFAULT_EBIBLE_TRANSLATION_CODE
+
+    def _is_jpnbible_source(self) -> bool:
+        return "jpn.bible" in urlparse(self.entry_url or "").netloc.lower()
+
+    def _get_jpnbible_translation_code(self) -> str:
+        """First path segment of the entry URL, e.g. ".../kougo/gen"."""
+        segments = [part for part in urlparse(self.entry_url or "").path.split("/") if part]
+        return segments[0] if segments else DEFAULT_JPNBIBLE_TRANSLATION_CODE
+
+    def _build_jpnbible_url(self, book_order: int, chapter_number: int) -> str:
+        if not 1 <= book_order <= len(JPNBIBLE_BOOK_SLUGS):
+            raise ValueError(f"Invalid jpn.bible book order: {book_order}")
+
+        parsed = urlparse(self.entry_url or DEFAULT_JPNBIBLE_KOUGO_ENTRY_URL)
+        base_url = urlunparse(parsed._replace(path="", params="", query="", fragment=""))
+        slug = JPNBIBLE_BOOK_SLUGS[book_order - 1]
+        # The fragment is the chapter; _fetch_soup slices the cached book page with it.
+        return f"{base_url}/{self._get_jpnbible_translation_code()}/{slug}#{chapter_number}"
+
+    def _is_wikisource_source(self) -> bool:
+        return "wikisource.org" in urlparse(self.entry_url or "").netloc.lower()
+
+    def _get_wikisource_variant(self) -> str:
+        """First path segment: the script variant, e.g. ".../zh-hant/..."."""
+        segments = [part for part in urlparse(self.entry_url or "").path.split("/") if part]
+        return segments[0] if segments else DEFAULT_WIKISOURCE_VARIANT
+
+    def _build_wikisource_url(self, book_order: int, chapter_number: int) -> str:
+        if not 1 <= book_order <= len(WIKISOURCE_BOOK_TITLES):
+            raise ValueError(f"Invalid wikisource book order: {book_order}")
+
+        parsed = urlparse(self.entry_url or DEFAULT_WIKISOURCE_CUV_ENTRY_URL)
+        base_url = urlunparse(parsed._replace(path="", params="", query="", fragment=""))
+        title = quote(f"{WIKISOURCE_PAGE_PREFIX}/{WIKISOURCE_BOOK_TITLES[book_order - 1]}")
+        # The fragment is the arabic chapter number, not the page anchor: the heading
+        # numerals are irregular (110 is 一百一十 but 111 is 一百十一), so they cannot be
+        # generated from an int. _split_wikisource_book keys the cache the same way.
+        return f"{base_url}/{self._get_wikisource_variant()}/{title}#{chapter_number}"
+
+    def _is_studybible_source(self) -> bool:
+        return "studybible.info" in urlparse(self.entry_url or "").netloc.lower()
+
+    def _get_studybible_version(self) -> str:
+        """First path segment of the entry URL, e.g. ".../Nestle/Matthew%201"."""
+        segments = [part for part in urlparse(self.entry_url or "").path.split("/") if part]
+        return segments[0] if segments else DEFAULT_STUDYBIBLE_VERSION
+
+    def _build_studybible_url(self, book_order: int, chapter_number: int) -> str:
+        # The source serves the New Testament only, and an Old Testament book name answers
+        # 200 with an empty passage box. The range check is therefore a write guard, not a
+        # tidiness check: see _extract_verses_from_studybible_page.
+        if not STUDYBIBLE_FIRST_NT_BOOK_ORDER <= book_order <= len(BIBLEGATEWAY_BOOK_NAMES):
+            raise ValueError(f"Invalid studybible book order: {book_order}")
+
+        parsed = urlparse(self.entry_url or DEFAULT_STUDYBIBLE_N1904_ENTRY_URL)
+        base_url = urlunparse(parsed._replace(path="", params="", query="", fragment=""))
+        # The English book names this source uses are the ones BibleGateway uses; the NT
+        # slice of that table matches all 27 spellings exactly.
+        book_name = BIBLEGATEWAY_BOOK_NAMES[book_order - 1]
+        # quote() keeps the observed "%20" form; urlencode() would emit "+".
+        segment = quote(f"{book_name} {chapter_number}")
+        return f"{base_url}/{self._get_studybible_version()}/{segment}"
+
+    @staticmethod
+    def _build_ebible_chapter_segment(book_order: int, chapter_number: int) -> str | None:
+        if not 1 <= book_order <= len(USFM_BOOK_CODES):
+            return None
+        chapter_count = KJV_CHAPTER_COUNTS[book_order - 1]
+        # Zero-padded to a per-book width: Psalms (150 chapters) needs three digits,
+        # every other book two. PSA23.htm is a 404 while PSA023.htm is not.
+        width = 3 if chapter_count >= 100 else 2
+        return f"{USFM_BOOK_CODES[book_order - 1].upper()}{chapter_number:0{width}d}"
+
+    def _build_ebible_url(self, book_order: int, chapter_number: int) -> str:
+        segment = self._build_ebible_chapter_segment(book_order, chapter_number)
+        if segment is None:
+            raise ValueError(f"Invalid ebible book order: {book_order}")
+
+        parsed = urlparse(self.entry_url or DEFAULT_EBIBLE_RV1909_ENTRY_URL)
+        base_url = urlunparse(parsed._replace(path="", params="", query="", fragment=""))
+        return f"{base_url}/{self._get_ebible_translation_code()}/{segment}.htm"
+
     @staticmethod
     def _get_kjv_chapter_count(book_order: int) -> int | None:
         if 1 <= book_order <= len(KJV_CHAPTER_COUNTS):
@@ -559,6 +928,14 @@ class HolyBibleScraper:
             return self._build_bskorea_url(book_order, chapter_number, book_code=book_code)
         if self._is_biblegateway_source():
             return self._build_biblegateway_url(book_order, chapter_number, book_code=book_code)
+        if self._is_ebible_source():
+            return self._build_ebible_url(book_order, chapter_number)
+        if self._is_jpnbible_source():
+            return self._build_jpnbible_url(book_order, chapter_number)
+        if self._is_wikisource_source():
+            return self._build_wikisource_url(book_order, chapter_number)
+        if self._is_studybible_source():
+            return self._build_studybible_url(book_order, chapter_number)
         template = self._ensure_navigation_template()
         return self._build_chapter_url_from_template(template, book_order, chapter_number)
 
@@ -611,6 +988,22 @@ class HolyBibleScraper:
                 book_order,
                 book_code=book_code,
             )
+            self._chapter_url_cache[book_order] = chapter_urls
+            return chapter_urls
+        if self._is_ebible_source():
+            chapter_urls = self._discover_chapter_urls_for_ebible(book_order)
+            self._chapter_url_cache[book_order] = chapter_urls
+            return chapter_urls
+        if self._is_jpnbible_source():
+            chapter_urls = self._discover_chapter_urls_for_jpnbible(book_order)
+            self._chapter_url_cache[book_order] = chapter_urls
+            return chapter_urls
+        if self._is_wikisource_source():
+            chapter_urls = self._discover_chapter_urls_for_wikisource(book_order)
+            self._chapter_url_cache[book_order] = chapter_urls
+            return chapter_urls
+        if self._is_studybible_source():
+            chapter_urls = self._discover_chapter_urls_for_studybible(book_order)
             self._chapter_url_cache[book_order] = chapter_urls
             return chapter_urls
 
@@ -706,6 +1099,57 @@ class HolyBibleScraper:
             for chapter_num in range(1, chapter_count + 1)
         }
 
+    def _discover_chapter_urls_for_wikisource(self, book_order: int) -> dict[int, str]:
+        # Chapter counts match KJV_CHAPTER_COUNTS exactly (measured: 1,189 chapter
+        # headings across the 66 book pages), so no probing request is needed.
+        chapter_count = self._get_kjv_chapter_count(book_order)
+        if chapter_count is None:
+            return {}
+
+        return {
+            chapter_num: self._build_wikisource_url(book_order, chapter_num)
+            for chapter_num in range(1, chapter_count + 1)
+        }
+
+    def _discover_chapter_urls_for_studybible(self, book_order: int) -> dict[int, str]:
+        # Chapter counts match KJV_CHAPTER_COUNTS for all 27 New Testament books
+        # (measured: 260 chapters). Probing is not an option here anyway - a chapter past
+        # the end answers 200 with an empty passage box, so a probe loop never terminates
+        # on a 404.
+        if book_order < STUDYBIBLE_FIRST_NT_BOOK_ORDER:
+            return {}
+
+        chapter_count = self._get_kjv_chapter_count(book_order)
+        if chapter_count is None:
+            return {}
+
+        return {
+            chapter_num: self._build_studybible_url(book_order, chapter_num)
+            for chapter_num in range(1, chapter_count + 1)
+        }
+
+    def _discover_chapter_urls_for_jpnbible(self, book_order: int) -> dict[int, str]:
+        # Chapter counts match KJV_CHAPTER_COUNTS exactly (measured: 1,189 chapter divs
+        # across the 66 book pages), so no probing request is needed.
+        chapter_count = self._get_kjv_chapter_count(book_order)
+        if chapter_count is None:
+            return {}
+
+        return {
+            chapter_num: self._build_jpnbible_url(book_order, chapter_num)
+            for chapter_num in range(1, chapter_count + 1)
+        }
+
+    def _discover_chapter_urls_for_ebible(self, book_order: int) -> dict[int, str]:
+        chapter_count = self._get_kjv_chapter_count(book_order)
+        if chapter_count is None:
+            return {}
+
+        return {
+            chapter_num: self._build_ebible_url(book_order, chapter_num)
+            for chapter_num in range(1, chapter_count + 1)
+        }
+
     def fetch_chapter_payload(
         self,
         book_order: int,
@@ -740,6 +1184,31 @@ class HolyBibleScraper:
         biblegateway_verses = self._extract_verses_from_biblegateway_passage(soup)
         if biblegateway_verses:
             return biblegateway_verses
+
+        # Must also precede the generic parsers: the regex fallback happily parses an
+        # eBible chapter into a full, contiguous verse list with the verse number left
+        # inside verse 1, which no verse-count check would catch.
+        ebible_verses = self._extract_verses_from_ebible_page(soup)
+        if ebible_verses:
+            return ebible_verses
+
+        # Same reason as eBible: left to the generic parsers, a jpn.bible chapter comes
+        # back as a full, contiguous verse list with the furigana readings baked into
+        # the text, which no verse-count or contiguity check would catch.
+        jpnbible_verses = self._extract_verses_from_jpnbible_page(soup)
+        if jpnbible_verses:
+            return jpnbible_verses
+
+        wikisource_verses = self._extract_verses_from_wikisource_page(soup)
+        if wikisource_verses:
+            return wikisource_verses
+
+        # Same reason again: the generic parsers read this source's cross-reference
+        # navigation as verses, so a Nestle chapter comes back as a single verse holding
+        # "Samuel 7:13" instead of the 25 Greek verses on the page.
+        studybible_verses = self._extract_verses_from_studybible_page(soup)
+        if studybible_verses:
+            return studybible_verses
 
         bibletable_verses = self._extract_verses_from_bibletable(soup)
         if bibletable_verses:
@@ -785,6 +1254,236 @@ class HolyBibleScraper:
             cleaned.append(Verse(verse_number=verse.verse_number, text=text))
 
         return cleaned
+
+    def _extract_verses_from_wikisource_page(self, soup: BeautifulSoup) -> list[Verse]:
+        """
+        Parse one 聖經 (和合本) chapter sliced out of a zh.wikisource book page:
+
+          <h2 id="第一篇">第一篇</h2>
+          <p><span id="1:1"><sup>1</sup></span><small>大衞的詩。</small>耶和華是…</p>
+          <p><span id="24:29"><sup>29</sup></span><sup>30</sup>利百加有一個哥哥…</p>
+
+        Text is collected per paragraph, never across paragraphs: the licence box at the
+        end of every book is a paragraph without any marker, and accumulating past the
+        paragraph would append it to that book's last verse.
+        """
+        chapters_seen = set()
+        for span in soup.select("span[id]"):
+            match = WIKISOURCE_VERSE_ID_PATTERN.match(span.get("id") or "")
+            if match is not None and span.find("sup"):
+                chapters_seen.add(match.group(1))
+        if not chapters_seen:
+            return []
+        # A whole book page would otherwise come back as one plausible, contiguous verse
+        # list: every chapter's verse 1 collides and _sanitize_verses keeps the first.
+        # The only way here is a broken _split_wikisource_book, so say so loudly.
+        if len(chapters_seen) > 1:
+            logger.warning(
+                "wikisource page carries %d chapters (%s...); expected a single chapter slice",
+                len(chapters_seen),
+                sorted(chapters_seen, key=int)[:5],
+            )
+            return []
+
+        working = BeautifulSoup(str(soup), "html.parser")
+        for removable in working.select(WIKISOURCE_REMOVABLE_SELECTOR):
+            removable.decompose()
+
+        heading = working.find(["h2", "h3"])
+        is_psalm = bool(heading) and heading.get_text("", strip=True).endswith("篇")
+
+        entries: list[list] = []
+        for paragraph in working.find_all("p"):
+            if paragraph.find("sup") is None:
+                continue
+            if is_psalm and not entries:
+                self._drop_wikisource_psalm_title(paragraph)
+
+            pending: list[int] = []
+            current: tuple[int, ...] | None = None
+            chunks: dict[tuple[int, ...], list[str]] = {}
+            for node in paragraph.descendants:
+                if isinstance(node, Tag):
+                    if node.name == "sup":
+                        label = node.get_text("", strip=True)
+                        # Cross-reference markers are Suzhou numerals, not verse numbers:
+                        # treating them as verses would cut the verse in half there.
+                        if label.isdigit():
+                            pending.append(int(label))
+                            current = None
+                    continue
+                if not isinstance(node, NavigableString):
+                    continue
+                # Marker text is never body text, whichever kind of marker it is.
+                if node.find_parent("sup") is not None:
+                    continue
+                text = str(node)
+                if not text.strip():
+                    continue
+                if pending:
+                    current = tuple(pending)
+                    chunks.setdefault(current, [])
+                    pending = []
+                if current is not None:
+                    chunks[current].append(text)
+
+            for numbers, parts in chunks.items():
+                text = self._normalize_text("".join(parts).replace(" ", " "))
+                entries.append([numbers, CJK_JOIN_PATTERN.sub("", text)])
+
+        verses: list[Verse] = []
+        for numbers, text in entries:
+            if not text:
+                continue
+            # Consecutive markers mean the source set those verses as one unit; store it
+            # at every number so verse numbering stays contiguous.
+            for verse_number in numbers:
+                verses.append(Verse(verse_number=verse_number, text=text))
+        return verses
+
+    @staticmethod
+    def _drop_wikisource_psalm_title(paragraph: Tag) -> None:
+        """
+        Remove a psalm superscription: the first <small> in verse 1 of a Psalm.
+
+        Every other translation here drops superscriptions. Outside Psalms - and inside
+        Psalms when the <small> is a bracketed note - the same markup carries a
+        translator's note that must be kept, so both conditions are required.
+        """
+        first = paragraph.find("small")
+        if first is None:
+            return
+        if first.get_text("", strip=True).startswith(WIKISOURCE_NOTE_OPENING_BRACKET):
+            return
+        marker = paragraph.find("sup")
+        if marker is not None and first not in marker.find_all_next("small"):
+            return
+        first.decompose()
+
+    def _parse_jpnbible_verse_id(self, raw_id: str | None) -> tuple[int, int, int, str] | None:
+        """
+        Read a jpn.bible verse id into (chapter, first verse, last verse, split suffix).
+
+        "3:16"                    -> (3, 16, 16, "")
+        "22:3!a"                  -> (22, 3, 3, "a")   one half of a split verse
+        "132:3 Ps.132.4 Ps.132.5" -> (132, 3, 5, "")   merged range, every member listed
+        """
+        if not raw_id:
+            return None
+
+        tokens = raw_id.split()
+        match = JPNBIBLE_VERSE_ID_PATTERN.match(tokens[0])
+        if match is None:
+            return None
+
+        chapter = int(match.group(1))
+        start = int(match.group(2))
+        suffix = match.group(3) or ""
+        end = start
+        for token in tokens[1:]:
+            ref_match = JPNBIBLE_OSIS_REF_PATTERN.match(token)
+            if ref_match is not None:
+                # The LAST listed reference is the end of the range, not the first.
+                end = max(end, int(ref_match.group(2)))
+
+        if end < start or end - start > JPNBIBLE_MAX_RANGE_WIDTH:
+            end = start
+        return chapter, start, end, suffix
+
+    def _extract_verses_from_jpnbible_page(self, soup: BeautifulSoup) -> list[Verse]:
+        """
+        Parse one jpn.bible chapter (a `div[id]` sliced out of the book page):
+
+          <span class="verse" id="1:1">
+            <span class="verse-number">1</span><span class="verse-content">text…</span>
+          </span>
+
+        Prose keeps the body inside `span.verse-content`. Poetry leaves that span empty
+        and the body follows as sibling nodes until an explicit end marker
+        (`span.verse[data-e-id]`), so text is accumulated between markers as on eBible.
+        """
+        # `span.verse-content` is what distinguishes this source: eBible uses
+        # span.verse+id="V1", bskorea and BibleGateway use different classes entirely.
+        # main.book cannot be used here because the caller passes a chapter slice.
+        if soup.select_one("span.verse-content") is None:
+            return []
+
+        working = BeautifulSoup(str(soup), "html.parser")
+        for removable in working.select(JPNBIBLE_REMOVABLE_SELECTOR):
+            removable.decompose()
+
+        chunks: dict[tuple[int, int, int, str], list[str]] = {}
+        current: tuple[int, int, int, str] | None = None
+        block_changed = False
+
+        for node in working.descendants:
+            if isinstance(node, Tag):
+                classes = node.get("class") or []
+                if node.name == "span" and "verse" in classes:
+                    # No id means an end marker (data-e-id): the verse stops here.
+                    current = self._parse_jpnbible_verse_id(node.get("id"))
+                    if current is not None:
+                        chunks.setdefault(current, [])
+                    block_changed = False
+                elif node.name in JPNBIBLE_BLOCK_TAGS and current is not None:
+                    block_changed = True
+                continue
+
+            if not isinstance(node, NavigableString) or current is None:
+                continue
+            # The rendered marker is the verse number, never body text.
+            if node.find_parent("span", class_="verse-number") is not None:
+                continue
+
+            text = str(node)
+            if not text.strip():
+                continue
+
+            chunks[current].append((" " if block_changed else "") + text)
+            block_changed = False
+
+        # A whole book page would otherwise come back as one plausible, contiguous verse
+        # list with every chapter's verse 1 concatenated. Callers must pass a chapter,
+        # and the only way here is a broken _split_jpnbible_book, so say so loudly: the
+        # generic parsers downstream would happily produce a full verse list from it.
+        chapters_seen = {key[0] for key in chunks}
+        if len(chapters_seen) > 1:
+            logger.warning(
+                "jpn.bible page carries %d chapters (%s...); expected a single chapter slice",
+                len(chapters_seen),
+                sorted(chapters_seen)[:5],
+            )
+            return []
+
+        # Join the halves of a split verse in suffix order. Exodus 22 prints 3b before
+        # 3a, so document order would reverse the sentence.
+        merged: dict[tuple[int, int], list[str]] = {}
+        for (_chapter, start, end, suffix), parts in sorted(
+            chunks.items(), key=lambda kv: (kv[0][1], kv[0][3])
+        ):
+            merged.setdefault((start, end), []).append("".join(parts))
+
+        entries: list[list] = []
+        for (start, end), parts in sorted(merged.items()):
+            text = self._normalize_text("".join(parts).replace(" ", " "))
+            # Block joins insert a space; CJK scripts must not keep it.
+            entries.append([start, end, CJK_JOIN_PATTERN.sub("", text)])
+
+        for index in range(len(entries) - 1):
+            text = entries[index][2]
+            if text and text[-1] in JPNBIBLE_OPENING_BRACKETS:
+                entries[index][2] = text[:-1].rstrip()
+                entries[index + 1][2] = text[-1] + entries[index + 1][2]
+
+        verses: list[Verse] = []
+        for start, end, text in entries:
+            if not text:
+                continue
+            # A merged range is one printed unit: store it at every number it covers so
+            # verse numbering stays contiguous and any number returns the right text.
+            for verse_number in range(start, end + 1):
+                verses.append(Verse(verse_number=verse_number, text=text))
+        return verses
 
     def _get_bskorea_content_root(self, soup: BeautifulSoup) -> Tag | None:
         root = soup.select_one("#tdBible1.bible_read")
@@ -905,6 +1604,210 @@ class HolyBibleScraper:
             translated = [text for text, is_omitted in parts if not is_omitted]
             text = " ".join(translated) if translated else BIBLEGATEWAY_OMITTED_VERSE_TEXT
             verses.append(Verse(verse_number=verse_number, text=text))
+        return verses
+
+    def _extract_verses_from_ebible_page(self, soup: BeautifulSoup) -> list[Verse]:
+        """
+        Parse an eBible.org (USFM-derived) chapter page:
+          <div class="main">
+            <div class="p"><span class="verse" id="V1">1&nbsp;</span>text...</div>
+          </div>
+
+        Unlike BibleGateway, verse text is NOT wrapped in an element: `span.verse` is
+        only the number marker and the body follows as sibling nodes. Text is therefore
+        accumulated between markers rather than read out of a node.
+        """
+        container = soup.select_one("div.main")
+        if container is None:
+            return []
+
+        working = BeautifulSoup(str(container), "html.parser")
+        for removable in working.select(EBIBLE_REMOVABLE_SELECTOR):
+            removable.decompose()
+
+        if working.select_one("span.verse") is None:
+            return []
+
+        # Detect before stripping footnotes: the evidence disappears with the marker.
+        omitted = self._collect_ebible_omitted_verses(working)
+        for marker in working.select(EBIBLE_FOOTNOTE_SELECTOR):
+            if marker.decomposed:  # went with an enclosing marker
+                continue
+            before = self._ebible_text_beside_note(marker.previous_elements)
+            after = self._ebible_text_beside_note(marker.next_elements)
+            marker.decompose()
+            # fraLSG sets some markers between two words with no space ("et<note>on"): the
+            # superscript is the only visible separator, so deleting it glues the words
+            # (189 places, mostly span.wj edges in the Gospels). The space goes onto the
+            # next text node, not in place of the marker - the accumulator below skips
+            # whitespace-only nodes. Letters on both sides only, so "mot<note>." stays.
+            if before is not None and after is not None and before[-1].isalpha() and after[0].isalpha():
+                after.replace_with(" " + after)
+
+        chunks: dict[int, list[str]] = {}
+        current: int | None = None
+        block_changed = False
+
+        for node in working.descendants:
+            if isinstance(node, Tag):
+                classes = node.get("class") or []
+                if node.name == "span" and "verse" in classes:
+                    # The id is authoritative; the rendered marker is display text.
+                    match = EBIBLE_VERSE_ID_PATTERN.match(node.get("id") or "")
+                    current = int(match.group(1)) if match else None
+                    block_changed = False
+                elif node.name in EBIBLE_BLOCK_TAGS and current is not None:
+                    block_changed = True
+                continue
+
+            if not isinstance(node, NavigableString) or current is None:
+                continue
+            # The marker's own text is the verse number, never body text.
+            if node.find_parent("span", class_="verse") is not None:
+                continue
+
+            text = str(node)
+            if not text.strip():
+                continue
+
+            # Keep source whitespace inside a block; separate blocks with one space so
+            # a verse spanning two paragraphs does not concatenate words.
+            chunks.setdefault(current, []).append((" " if block_changed else "") + text)
+            block_changed = False
+
+        verses: list[Verse] = []
+        for verse_number in sorted(set(chunks) | omitted):
+            text = self._normalize_text("".join(chunks.get(verse_number, [])).replace(" ", " "))
+            # Block joins insert a space; CJK scripts must not keep it (spablm/RV1909 must).
+            text = CJK_JOIN_PATTERN.sub("", text)
+            if not text and verse_number in omitted:
+                text = OMITTED_VERSE_TEXT
+            if text:
+                verses.append(Verse(verse_number=verse_number, text=text))
+        return verses
+
+    @staticmethod
+    def _ebible_text_beside_note(elements: Iterable[PageElement]) -> NavigableString | None:
+        """First non-empty text in `elements` that no footnote marker contains."""
+        for element in elements:
+            if not isinstance(element, NavigableString) or not element:
+                continue
+            # Skips the marker's own popup (next_elements walks into it first) and the
+            # popup of an adjacent marker.
+            if any(parent.css.match(EBIBLE_FOOTNOTE_SELECTOR) for parent in element.parents):
+                continue
+            return element
+        return None
+
+    @staticmethod
+    def _collect_ebible_omitted_verses(working: BeautifulSoup) -> set[int]:
+        """
+        Verse markers whose whole body is a footnote — the source omits the text.
+
+        spablm drops the same four verses BibleGateway's WEB does (Luke 17:36,
+        Acts 8:37, 15:34, 24:7), emitting the marker plus an `a.notemark` explaining
+        which manuscripts carry it. Recording them as OMITTED_VERSE_TEXT keeps verse
+        numbering contiguous, so a real gap still reads as a scrape failure.
+
+        The footnote is required evidence: an arbitrarily empty span must stay skipped,
+        or a DOM change would quietly fill the DB with placeholders instead of failing.
+        """
+        with_note: set[int] = set()
+        with_body: set[int] = set()
+        current: int | None = None
+
+        for node in working.descendants:
+            if isinstance(node, Tag):
+                classes = node.get("class") or []
+                if node.name == "span" and "verse" in classes:
+                    match = EBIBLE_VERSE_ID_PATTERN.match(node.get("id") or "")
+                    current = int(match.group(1)) if match else None
+                elif current is not None and "notemark" in classes:
+                    with_note.add(current)
+                continue
+
+            if not isinstance(node, NavigableString) or current is None:
+                continue
+            if node.find_parent("span", class_="verse") is not None:
+                continue
+            # Text inside the popup belongs to the note, not to the verse.
+            if node.find_parent(class_="notemark") is not None:
+                continue
+            if str(node).strip():
+                with_body.add(current)
+
+        return with_note - with_body
+
+    def _extract_verses_from_studybible_page(self, soup: BeautifulSoup) -> list[Verse]:
+        """
+        Parse a studybible.info chapter page:
+          <div class="passage row Nestle">Nestle<sup><a class="version_info">(i)</a></sup>
+            <sup><a class="verse_ref Nestle" title="Matthew 1:1 Nestle">1</a></sup> Βίβλος ...
+          </div>
+
+        Like eBible, the marker holds only the number and the body follows as sibling
+        nodes, so text is accumulated between markers. The leading "Nestle (i)" version
+        link sits before the first marker and is dropped by that alone.
+
+        No block separator is inserted between chunks: measured across all 260 chapters,
+        the container holds nothing but `sup` and `a` - no `p`, `br` or `div` - so the
+        block-boundary space eBible needs would only be misleading here.
+        """
+        version = self._get_studybible_version()
+        container = None
+        for candidate in soup.select("div.passage"):
+            if version in (candidate.get("class") or []):
+                container = candidate
+                break
+        if container is None:
+            return []
+
+        working = BeautifulSoup(str(container), "html.parser")
+        if working.select_one("a.verse_ref") is None:
+            return []
+
+        chunks: dict[int, list[str]] = {}
+        chapters: set[int] = set()
+        current: int | None = None
+
+        for node in working.descendants:
+            if isinstance(node, Tag):
+                if node.name == "a" and "verse_ref" in (node.get("class") or []):
+                    # The title is authoritative and carries the chapter as well.
+                    match = STUDYBIBLE_REF_PATTERN.match(
+                        (node.get("title") or "").removesuffix(f" {version}").strip()
+                    )
+                    current = int(match.group("verse")) if match else None
+                    if match:
+                        chapters.add(int(match.group("chapter")))
+                continue
+
+            if not isinstance(node, NavigableString) or current is None:
+                continue
+            # Marker text is the verse number, and the version link is not body text.
+            if node.find_parent("a") is not None or node.find_parent("sup") is not None:
+                continue
+            if node.strip():
+                chunks.setdefault(current, []).append(str(node))
+
+        if len(chapters) > 1:
+            logger.warning(
+                "studybible page mixes chapters %s; skipping to avoid a plausible splice",
+                sorted(chapters),
+            )
+            return []
+
+        verses: list[Verse] = []
+        for verse_number in sorted(chunks):
+            # 27% of this source is not NFC: U+0387 plus 21 oxia letters. Left as-is,
+            # Matthew 1:1 does not match a normally typed "Βίβλος". NFC is applied here
+            # rather than globally because every other source is already NFC, and because
+            # check_translation_drift.py re-parses through this same adapter.
+            text = unicodedata.normalize(
+                "NFC", self._normalize_text("".join(chunks[verse_number]))
+            )
+            if text:
+                verses.append(Verse(verse_number=verse_number, text=text))
         return verses
 
     def _extract_verses_from_bibletable(self, soup: BeautifulSoup) -> list[Verse]:

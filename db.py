@@ -187,6 +187,18 @@ class BibleRepository:
             rows = cur.fetchall()
         return {row[0] for row in rows}
 
+    def get_verse_texts(self, conn: connection, chapter_id: int) -> dict[int, str]:
+        """Read-only companion to get_existing_verse_numbers, for drift comparison."""
+        query = """
+            SELECT verse_number, text
+            FROM public.bible_verse
+            WHERE chapter_id = %s
+        """
+        with conn.cursor() as cur:
+            cur.execute(query, (chapter_id,))
+            rows = cur.fetchall()
+        return {row[0]: row[1] for row in rows}
+
     def insert_missing_verses(
         self,
         conn: connection,

@@ -1,7 +1,9 @@
 import os
 
 from models import Book, ChapterPayload, Verse
+from scraper import HolyBibleScraper
 from scrape_bible_to_db import (
+    ENTRY_URL_ENV_BY_TRANSLATION_TYPE,
     process_book,
     resolve_book_code_for_source,
     resolve_default_entry_url,
@@ -61,6 +63,18 @@ class FakeConn:
 
 
 class FakeScraper:
+    # Borrow the real version-token logic rather than re-implementing it, so these fakes
+    # cannot drift from production behaviour. They only need `entry_url`.
+    get_source_version = HolyBibleScraper.get_source_version
+    _is_ebible_source = HolyBibleScraper._is_ebible_source
+    _get_ebible_translation_code = HolyBibleScraper._get_ebible_translation_code
+    _is_jpnbible_source = HolyBibleScraper._is_jpnbible_source
+    _get_jpnbible_translation_code = HolyBibleScraper._get_jpnbible_translation_code
+    _is_wikisource_source = HolyBibleScraper._is_wikisource_source
+    _get_wikisource_variant = HolyBibleScraper._get_wikisource_variant
+    _is_studybible_source = HolyBibleScraper._is_studybible_source
+    _get_studybible_version = HolyBibleScraper._get_studybible_version
+
     def __init__(self, entry_url: str) -> None:
         self.entry_url = entry_url
         self.discover_calls: list[tuple[int, str | None]] = []
@@ -323,10 +337,9 @@ WEB_TRANSLATION_METADATA = {
     "translation_type": "WEB",
 }
 
-ENTRY_URL_ENV_KEYS = (
-    "KJV_ENTRY_URL",
-    "NKRV_ENTRY_URL",
-    "WEB_ENTRY_URL",
+# Derived from the source of truth so a newly supported translation cannot leak
+# between tests: a hardcoded list silently missed ASV_ENTRY_URL once already.
+ENTRY_URL_ENV_KEYS = tuple(ENTRY_URL_ENV_BY_TRANSLATION_TYPE.values()) + (
     "BIBLE_TRANSLATION_ID",
     "BIBLE_TRANSLATION_TYPE",
     "BIBLE_TRANSLATION_NAME",
@@ -575,6 +588,284 @@ def test_validate_source_translation_compatibility_rejects_unmapped_version_with
         raise AssertionError("expected RuntimeError")
 
 
+EBIBLE_RV1909_ENTRY_URL = "https://ebible.org/spaRV1909/GEN01.htm"
+EBIBLE_SBLM_ENTRY_URL = "https://ebible.org/spablm/GEN01.htm"
+EBIBLE_JPNMEB_ENTRY_URL = "https://ebible.org/jpnm/GEN01.htm"
+
+RVR1909_TRANSLATION_METADATA = {
+    "id": 29,
+    "language_code": "es",
+    "name": "Reina Valera 1909",
+    "translation_type": "RVR1909",
+}
+
+JPNMEB_TRANSLATION_METADATA = {
+    "id": 36,
+    "language_code": "ja",
+    "name": "フリーダム・バイブル",
+    "translation_type": "JPNMEB",
+}
+
+SBLM_TRANSLATION_METADATA = {
+    "id": 34,
+    "language_code": "es",
+    "name": "Santa Biblia libre para el mundo",
+    "translation_type": "SBLM",
+}
+
+
+class EbibleScraper(FakeScraper):
+    def get_source_name(self) -> str:
+        return "ebible"
+
+
+def test_resolve_default_entry_url_uses_rvr1909_when_only_one_configured() -> None:
+    with _with_entry_url_env({"RVR1909_ENTRY_URL": EBIBLE_RV1909_ENTRY_URL}):
+        assert resolve_default_entry_url() == EBIBLE_RV1909_ENTRY_URL
+
+
+def test_resolve_default_entry_url_selects_rvr1909_by_spanish_language_code() -> None:
+    with _with_entry_url_env(
+        {
+            "KJV_ENTRY_URL": "https://thekingsbible.com/Bible/1/1",
+            "RVR1909_ENTRY_URL": EBIBLE_RV1909_ENTRY_URL,
+            "BIBLE_LANGUAGE_CODE": "es",
+        }
+    ):
+        assert resolve_default_entry_url() == EBIBLE_RV1909_ENTRY_URL
+
+
+def test_validate_source_translation_compatibility_for_ebible_rvr1909() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(RVR1909_TRANSLATION_METADATA)
+    scraper = EbibleScraper(EBIBLE_RV1909_ENTRY_URL)
+
+    validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+
+
+def test_validate_source_translation_compatibility_for_ebible_sblm() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(SBLM_TRANSLATION_METADATA)
+    scraper = EbibleScraper(EBIBLE_SBLM_ENTRY_URL)
+
+    validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+
+
+def test_validate_source_translation_compatibility_rejects_sblm_url_with_rvr1909_metadata() -> None:
+    # eBible serves both translations, so the source name alone cannot tell them apart.
+    # Without the path-derived version token this mismatch would pass silently and load
+    # SBLM text under the RV1909 books.
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(RVR1909_TRANSLATION_METADATA)
+    scraper = EbibleScraper(EBIBLE_SBLM_ENTRY_URL)
+
+    try:
+        validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+    except RuntimeError as exc:
+        assert "Source/translation mismatch" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_validate_source_translation_compatibility_rejects_rvr1909_url_with_sblm_metadata() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(SBLM_TRANSLATION_METADATA)
+    scraper = EbibleScraper(EBIBLE_RV1909_ENTRY_URL)
+
+    try:
+        validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+    except RuntimeError as exc:
+        assert "Source/translation mismatch" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_validate_source_translation_compatibility_ignores_ebible_code_case() -> None:
+    # The RV1909 code is mixed case; a differently-cased URL must still resolve.
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(RVR1909_TRANSLATION_METADATA)
+    scraper = EbibleScraper("https://ebible.org/sparv1909/GEN01.htm")
+
+    validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+
+
+def test_resolve_default_entry_url_is_ambiguous_for_two_spanish_sources() -> None:
+    with _with_entry_url_env({
+        "RVR1909_ENTRY_URL": EBIBLE_RV1909_ENTRY_URL,
+        "SBLM_ENTRY_URL": EBIBLE_SBLM_ENTRY_URL,
+        "BIBLE_LANGUAGE_CODE": "es",
+    }):
+        try:
+            resolve_default_entry_url()
+        except ValueError as exc:
+            assert "Ambiguous entry URL" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")
+
+
+def test_resolve_default_entry_url_picks_sblm_when_translation_type_declared() -> None:
+    with _with_entry_url_env({
+        "RVR1909_ENTRY_URL": EBIBLE_RV1909_ENTRY_URL,
+        "SBLM_ENTRY_URL": EBIBLE_SBLM_ENTRY_URL,
+        "BIBLE_LANGUAGE_CODE": "es",
+        "BIBLE_TRANSLATION_TYPE": "SBLM",
+    }):
+        assert resolve_default_entry_url() == EBIBLE_SBLM_ENTRY_URL
+
+
+def test_validate_source_translation_compatibility_for_ebible_jfb() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(JPNMEB_TRANSLATION_METADATA)
+    scraper = EbibleScraper(EBIBLE_JPNMEB_ENTRY_URL)
+
+    validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+
+
+def test_validate_source_translation_compatibility_separates_three_ebible_translations() -> None:
+    """eBible now serves three translations, so the path token has to tell them apart."""
+    pairs = [
+        (EBIBLE_JPNMEB_ENTRY_URL, SBLM_TRANSLATION_METADATA),
+        (EBIBLE_JPNMEB_ENTRY_URL, RVR1909_TRANSLATION_METADATA),
+        (EBIBLE_SBLM_ENTRY_URL, JPNMEB_TRANSLATION_METADATA),
+        (EBIBLE_RV1909_ENTRY_URL, JPNMEB_TRANSLATION_METADATA),
+    ]
+    for entry_url, metadata in pairs:
+        repo = FakeRepo()
+        conn = FakeConn()
+        conn.translation_metadata = dict(metadata)
+        scraper = EbibleScraper(entry_url)
+        try:
+            validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+        except RuntimeError as exc:
+            assert "Source/translation mismatch" in str(exc)
+        else:
+            raise AssertionError(f"expected RuntimeError for {entry_url} + {metadata['translation_type']}")
+
+
+EBIBLE_LSG1910_ENTRY_URL = "https://ebible.org/fraLSG/GEN01.htm"
+
+LSG1910_TRANSLATION_METADATA = {
+    "id": 42,
+    "language_code": "fr",
+    "name": "Louis Segond 1910",
+    "translation_type": "LSG1910",
+}
+
+
+def test_validate_source_translation_compatibility_for_ebible_lsg1910() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(LSG1910_TRANSLATION_METADATA)
+    scraper = EbibleScraper(EBIBLE_LSG1910_ENTRY_URL)
+
+    validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+
+
+def test_validate_source_translation_compatibility_recognises_lsg1910_by_name() -> None:
+    # With translation_type empty the row is identified by (name, language_code), so the
+    # registered name has to match the bible_translation row character for character.
+    # An unrecognised name only logs a warning, so the rejection is what proves the match.
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(LSG1910_TRANSLATION_METADATA, translation_type=None)
+    scraper = EbibleScraper(EBIBLE_RV1909_ENTRY_URL)
+
+    try:
+        validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+    except RuntimeError as exc:
+        assert "identifies 'LSG1910'" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_validate_source_translation_compatibility_separates_lsg1910_from_other_ebible_translations() -> None:
+    """A fourth eBible translation: fraLSG must pass for none of the other three, and
+    none of them for LSG1910."""
+    pairs = [
+        (EBIBLE_LSG1910_ENTRY_URL, RVR1909_TRANSLATION_METADATA),
+        (EBIBLE_LSG1910_ENTRY_URL, SBLM_TRANSLATION_METADATA),
+        (EBIBLE_LSG1910_ENTRY_URL, JPNMEB_TRANSLATION_METADATA),
+        (EBIBLE_RV1909_ENTRY_URL, LSG1910_TRANSLATION_METADATA),
+        (EBIBLE_SBLM_ENTRY_URL, LSG1910_TRANSLATION_METADATA),
+        (EBIBLE_JPNMEB_ENTRY_URL, LSG1910_TRANSLATION_METADATA),
+    ]
+    for entry_url, metadata in pairs:
+        repo = FakeRepo()
+        conn = FakeConn()
+        conn.translation_metadata = dict(metadata)
+        scraper = EbibleScraper(entry_url)
+        try:
+            validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+        except RuntimeError as exc:
+            assert "Source/translation mismatch" in str(exc)
+        else:
+            raise AssertionError(f"expected RuntimeError for {entry_url} + {metadata['translation_type']}")
+
+
+def test_resolve_default_entry_url_picks_lsg1910_for_french() -> None:
+    with _with_entry_url_env({
+        "LSG1910_ENTRY_URL": EBIBLE_LSG1910_ENTRY_URL,
+        "SBLM_ENTRY_URL": EBIBLE_SBLM_ENTRY_URL,
+        "BIBLE_LANGUAGE_CODE": "fr",
+    }):
+        assert resolve_default_entry_url() == EBIBLE_LSG1910_ENTRY_URL
+
+
+def test_resolve_default_entry_url_picks_jfb_for_japanese() -> None:
+    with _with_entry_url_env({
+        "JPNMEB_ENTRY_URL": EBIBLE_JPNMEB_ENTRY_URL,
+        "SBLM_ENTRY_URL": EBIBLE_SBLM_ENTRY_URL,
+        "BIBLE_LANGUAGE_CODE": "ja",
+    }):
+        assert resolve_default_entry_url() == EBIBLE_JPNMEB_ENTRY_URL
+
+
+def test_validate_source_translation_compatibility_rejects_ebible_with_rvr1960() -> None:
+    # RVR1960 already exists in the DB; loading 1909 text under it would be silent
+    # corruption, so the check must refuse it.
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = {
+        "id": 28,
+        "language_code": "es",
+        "name": "Reina-Valera 1960",
+        "translation_type": "RVR1960",
+    }
+    scraper = EbibleScraper(EBIBLE_RV1909_ENTRY_URL)
+
+    try:
+        validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+    except RuntimeError as exc:
+        assert "Source/translation mismatch" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_validate_source_translation_compatibility_rejects_thekingsbible_with_rvr1909() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(RVR1909_TRANSLATION_METADATA)
+
+    class KingsBibleScraper(FakeScraper):
+        def get_source_name(self) -> str:
+            return "thekingsbible"
+
+    scraper = KingsBibleScraper("https://thekingsbible.com/Bible/1/1")
+
+    try:
+        validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+    except RuntimeError as exc:
+        assert "Source/translation mismatch" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
 def test_resolve_book_code_for_source_uses_book_name_for_biblegateway() -> None:
     scraper = BibleGatewayScraper(BIBLEGATEWAY_WEB_ENTRY_URL)
     book = Book(
@@ -693,3 +984,199 @@ def test_validate_test_target_args_requires_both_values() -> None:
         assert "--test-book and --test-chapter" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+class _RowCursor:
+    """Minimal psycopg2-like cursor returning a fixed row set."""
+
+    def __init__(self, rows: list[tuple]) -> None:
+        self._rows = rows
+        self.executed: list[tuple] = []
+
+    def __enter__(self) -> "_RowCursor":
+        return self
+
+    def __exit__(self, *_exc) -> bool:
+        return False
+
+    def execute(self, query: str, params=None) -> None:
+        self.executed.append((query, params))
+
+    def fetchall(self) -> list[tuple]:
+        return self._rows
+
+
+class _RowConn:
+    def __init__(self, rows: list[tuple]) -> None:
+        self.cursor_obj = _RowCursor(rows)
+
+    def cursor(self) -> _RowCursor:
+        return self.cursor_obj
+
+
+def test_get_verse_texts_maps_verse_number_to_text() -> None:
+    from db import BibleRepository
+
+    conn = _RowConn([(2, "segundo"), (1, "primero"), (3, "tercero")])
+    repo = BibleRepository(translation_id=33)
+
+    assert repo.get_verse_texts(conn, 4242) == {
+        1: "primero",
+        2: "segundo",
+        3: "tercero",
+    }
+    _query, params = conn.cursor_obj.executed[0]
+    assert params == (4242,)
+
+
+def test_get_verse_texts_returns_empty_dict_for_empty_chapter() -> None:
+    from db import BibleRepository
+
+    repo = BibleRepository(translation_id=33)
+    assert repo.get_verse_texts(_RowConn([]), 1) == {}
+
+
+def _with_env(**values):
+    """Set env vars for the duration of a call and restore them afterwards."""
+    original = {key: os.getenv(key) for key in values}
+
+    def restore() -> None:
+        for key, value in original.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    for key, value in values.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+    return restore
+
+
+def test_resolve_default_entry_url_rejects_ambiguous_japanese() -> None:
+    # 'ja' now covers two translations, so the language code alone no longer identifies
+    # a source - the same trap 'en' has. Raising beats silently loading the wrong text.
+    restore = _with_env(
+        JPNMEB_ENTRY_URL="https://ebible.org/jpnm/GEN01.htm",
+        KOUGO_ENTRY_URL="https://jpn.bible/kougo/gen#1",
+        BIBLE_LANGUAGE_CODE="ja",
+        BIBLE_TRANSLATION_TYPE=None,
+        BIBLE_TRANSLATION_ID=None,
+        BIBLE_TRANSLATION_NAME=None,
+        KJV_ENTRY_URL=None,
+        NKRV_ENTRY_URL=None,
+        WEB_ENTRY_URL=None,
+        ASV_ENTRY_URL=None,
+        RVR1909_ENTRY_URL=None,
+        SBLM_ENTRY_URL=None,
+    )
+    try:
+        try:
+            resolve_default_entry_url()
+        except ValueError as exc:
+            assert "Ambiguous entry URL" in str(exc)
+            assert "JPNMEB_ENTRY_URL" in str(exc)
+            assert "KOUGO_ENTRY_URL" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")
+    finally:
+        restore()
+
+
+def test_resolve_default_entry_url_keeps_jpnmeb_when_type_is_declared() -> None:
+    restore = _with_env(
+        JPNMEB_ENTRY_URL="https://ebible.org/jpnm/GEN01.htm",
+        KOUGO_ENTRY_URL="https://jpn.bible/kougo/gen#1",
+        BIBLE_LANGUAGE_CODE="ja",
+        BIBLE_TRANSLATION_TYPE="JPNMEB",
+        BIBLE_TRANSLATION_ID=None,
+        BIBLE_TRANSLATION_NAME=None,
+        KJV_ENTRY_URL=None,
+        NKRV_ENTRY_URL=None,
+        WEB_ENTRY_URL=None,
+        ASV_ENTRY_URL=None,
+        RVR1909_ENTRY_URL=None,
+        SBLM_ENTRY_URL=None,
+    )
+    try:
+        assert resolve_default_entry_url() == "https://ebible.org/jpnm/GEN01.htm"
+    finally:
+        restore()
+
+
+def test_resolve_default_entry_url_selects_kougo_when_type_is_declared() -> None:
+    restore = _with_env(
+        JPNMEB_ENTRY_URL="https://ebible.org/jpnm/GEN01.htm",
+        KOUGO_ENTRY_URL="https://jpn.bible/kougo/gen#1",
+        BIBLE_LANGUAGE_CODE="ja",
+        BIBLE_TRANSLATION_TYPE="KOUGO",
+        BIBLE_TRANSLATION_ID=None,
+        BIBLE_TRANSLATION_NAME=None,
+        KJV_ENTRY_URL=None,
+        NKRV_ENTRY_URL=None,
+        WEB_ENTRY_URL=None,
+        ASV_ENTRY_URL=None,
+        RVR1909_ENTRY_URL=None,
+        SBLM_ENTRY_URL=None,
+    )
+    try:
+        assert resolve_default_entry_url() == "https://jpn.bible/kougo/gen#1"
+    finally:
+        restore()
+
+
+def test_validate_source_translation_compatibility_for_jpnbible_kougo() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = {
+        "id": 37,
+        "language_code": "ja",
+        "name": "口語訳聖書",
+        "translation_type": "KOUGO",
+    }
+
+    class JpnBibleScraper(FakeScraper):
+        def get_source_name(self) -> str:
+            return "jpnbible"
+
+    validate_source_translation_compatibility(
+        repo=repo, conn=conn, scraper=JpnBibleScraper("https://jpn.bible/kougo/gen#1")
+    )
+
+
+def test_validate_source_translation_compatibility_rejects_jpnbible_with_jpnmeb() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = {
+        "id": 36,
+        "language_code": "ja",
+        "name": "フリーダム・バイブル",
+        "translation_type": "JPNMEB",
+    }
+
+    class JpnBibleScraper(FakeScraper):
+        def get_source_name(self) -> str:
+            return "jpnbible"
+
+    try:
+        validate_source_translation_compatibility(
+            repo=repo, conn=conn, scraper=JpnBibleScraper("https://jpn.bible/kougo/gen#1")
+        )
+    except RuntimeError as exc:
+        assert "Source/translation mismatch" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_resolve_book_code_for_source_is_none_for_jpnbible() -> None:
+    class JpnBibleScraper(FakeScraper):
+        def get_source_name(self) -> str:
+            return "jpnbible"
+
+    scraper = JpnBibleScraper("https://jpn.bible/kougo/gen#1")
+    book = Book(id=1, book_order=22, book_key="SNG", name="雅歌", abbreviation="SNG")
+
+    # book_key would build /kougo/sng, which is a 404: the slug table must win.
+    assert resolve_book_code_for_source(scraper, book) is None

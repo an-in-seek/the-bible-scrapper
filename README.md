@@ -2,18 +2,33 @@
 
 성경 본문을 스크래핑해 PostgreSQL의 `bible_chapter`, `bible_verse`에 적재하는 도구입니다.
 
-현재 기준으로 안정적으로 맞춰진 소스는 아래 4개입니다.
+현재 기준으로 안정적으로 맞춰진 소스는 아래 12개입니다.
 
 - `thekingsbible.com` KJV
 - `bskorea.or.kr` NKRV(`version=GAE`)
 - `biblegateway.com` WEB(`version=WEB`, World English Bible)
 - `biblegateway.com` ASV(`version=ASV`, American Standard Version)
+- `ebible.org` RVR1909(`spaRV1909`, Reina Valera 1909 — 스페인어)
+- `ebible.org` SBLM(`spablm`, Santa Biblia libre para el mundo — 스페인어)
+- `ebible.org` JPNMEB(`jpnm`, フリーダム・バイブル — 일본어)
+- `jpn.bible` KOUGO(`kougo`, 口語訳聖書 1954/1955 — 일본어)
+- `zh.wikisource.org` CUVT(`zh-hant`, 聖經和合本 1919 — 중국어 번체)
+- `zh.wikisource.org` CUVS(`zh-hans`, 圣经和合本 1919 — 중국어 간체)
+- `studybible.info` N1904(`Nestle`, Nestle 1904 그리스어 신약 — 신약 27권만)
+- `ebible.org` LSG1910(`fraLSG`, Louis Segond 1910 — 프랑스어, LSG 고유 절 체계)
 
 설계 문서:
 
 - NKRV: [docs/nkrv-scraping-design.md](docs/nkrv-scraping-design.md)
 - WEB: [docs/world-english-bible-scraping-design.md](docs/world-english-bible-scraping-design.md)
 - ASV: [docs/american-standard-version-scraping-design.md](docs/american-standard-version-scraping-design.md)
+- RVR1909: [docs/reina-valera-1909-scraping-design.md](docs/reina-valera-1909-scraping-design.md)
+- SBLM: [docs/santa-biblia-libre-para-el-mundo-scraping-design.md](docs/santa-biblia-libre-para-el-mundo-scraping-design.md)
+- JPNMEB: [docs/japanese-public-domain-scraping-design.md](docs/japanese-public-domain-scraping-design.md)
+- KOUGO: [docs/japanese-colloquial-1955-scraping-design.md](docs/japanese-colloquial-1955-scraping-design.md)
+- CUVT/CUVS: [docs/chinese-union-version-1919-scraping-design.md](docs/chinese-union-version-1919-scraping-design.md)
+- N1904: [docs/greek-new-testament-nestle-1904-scraping-design.md](docs/greek-new-testament-nestle-1904-scraping-design.md)
+- LSG1910(프랑스어; Ostervald · Martin은 보류): [docs/french-public-domain-scraping-design.md](docs/french-public-domain-scraping-design.md)
 
 ## 주요 특징
 
@@ -36,9 +51,18 @@
 - `tests/test_db.py`: 번역본 식별 로직 테스트
 - `tests/test_pipeline.py`: 파이프라인/인자 검증 테스트
 - `scripts/run_tests_wsl.sh`: WSL 테스트 실행 스크립트
+- `scripts/check_translation_drift.py`: 적재된 번역본과 원문을 대조하는 읽기 전용 점검 도구
 - `docs/nkrv-scraping-design.md`: NKRV 설계 문서
 - `docs/world-english-bible-scraping-design.md`: WEB 설계 문서
 - `docs/american-standard-version-scraping-design.md`: ASV 설계 문서
+- `docs/reina-valera-1909-scraping-design.md`: RVR1909 설계 문서
+- `docs/santa-biblia-libre-para-el-mundo-scraping-design.md`: SBLM 설계 문서
+- `docs/japanese-public-domain-scraping-design.md`: JPNMEB(일본어) 설계 문서
+- `docs/new-japanese-nt-scraping-design.md`: JPNLOC(일본어 신약) 설계 문서 (미구현)
+- `docs/japanese-colloquial-1955-scraping-design.md`: KOUGO(일본어 口語訳 1954/1955) 설계 문서
+- `docs/chinese-union-version-1919-scraping-design.md`: CUVT/CUVS(중국어 和合本 1919) 설계 문서
+- `docs/greek-new-testament-nestle-1904-scraping-design.md`: N1904(그리스어 신약 Nestle 1904) 설계 문서. Rahlfs LXX 1935 불채택 근거 포함
+- `docs/french-public-domain-scraping-design.md`: LSG1910(프랑스어 Louis Segond 1910) 설계 문서. Ostervald·Martin 보류 근거 포함
 
 ## 요구 사항
 
@@ -85,21 +109,35 @@ KJV_ENTRY_URL=https://thekingsbible.com/Bible/1/1
 NKRV_ENTRY_URL=https://www.bskorea.or.kr/bible/korbibReadpage.php?version=GAE&book=gen&chap=1&sec=1&cVersion=&fontSize=15px&fontWeight=normal
 WEB_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=WEB
 ASV_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=ASV
+RVR1909_ENTRY_URL=https://ebible.org/spaRV1909/GEN01.htm
+SBLM_ENTRY_URL=https://ebible.org/spablm/GEN01.htm
+JPNMEB_ENTRY_URL=https://ebible.org/jpnm/GEN01.htm
+KOUGO_ENTRY_URL=https://jpn.bible/kougo/gen#1
+N1904_ENTRY_URL=https://studybible.info/Nestle/Matthew%201
+LSG1910_ENTRY_URL=https://ebible.org/fraLSG/GEN01.htm
+CUVT_ENTRY_URL=https://zh.wikisource.org/zh-hant/%E8%81%96%E7%B6%93_(%E5%92%8C%E5%90%88%E6%9C%AC)/%E5%89%B5%E4%B8%96%E8%A8%98#1
+CUVS_ENTRY_URL=https://zh.wikisource.org/zh-hans/%E8%81%96%E7%B6%93_(%E5%92%8C%E5%90%88%E6%9C%AC)/%E5%89%B5%E4%B8%96%E8%A8%98#1
 ```
 
 `--entry-url`를 지정하지 않으면 기본 URL은 아래 순서로 결정됩니다.
 
-1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV`)에 해당하는 환경변수
+1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JPNMEB` / `KOUGO` / `CUVT` / `CUVS` / `N1904` / `LSG1910`)에 해당하는 환경변수
 2. `BIBLE_TRANSLATION_ID=2` 또는 `BIBLE_TRANSLATION_NAME=개역개정`이면 `NKRV_ENTRY_URL`
 3. `BIBLE_LANGUAGE_CODE`로 좁혀지는 소스가 하나면 그 값
    - `ko` -> `NKRV_ENTRY_URL`
    - `en` -> `KJV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` 중 설정된 것
+   - `es` -> `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` 중 설정된 것
+   - `ja` -> `JPNMEB_ENTRY_URL` / `KOUGO_ENTRY_URL` 중 설정된 것
+   - `zh` -> `CUVT_ENTRY_URL` / `CUVS_ENTRY_URL` 중 설정된 것
+   - `el` -> `N1904_ENTRY_URL` (본문은 코이네 그리스어지만 DB의 `language_code` CHECK가 `grc`가 아닌 `el`을 허용하므로 `el`로 등록되어 있습니다)
+   - `fr` -> `LSG1910_ENTRY_URL`
 4. 설정된 엔트리 URL이 하나뿐이면 그 값
-5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` 순으로 선택
+5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JPNMEB` -> `KOUGO` -> `CUVT` -> `CUVS` -> `N1904` -> `LSG1910` 순으로 선택
 6. 아무것도 없으면 내장 기본값 `https://thekingsbible.com/Bible/1/1` 사용
 
-주의: `BIBLE_LANGUAGE_CODE=en`은 더 이상 KJV를 단독으로 지시하지 않습니다.  
-영어 소스가 둘 이상 설정된 상태에서 `en`만 주면 실행이 중단됩니다.  
+주의: `BIBLE_LANGUAGE_CODE`만으로는 소스가 특정되지 않습니다.  
+`en`(KJV / WEB / ASV), `es`(RVR1909 / SBLM), `ja`(JPNMEB / KOUGO), `zh`(CUVT / CUVS) 모두 소스가 둘 이상이라,  
+해당 엔트리 URL이 여러 개 설정된 상태에서 언어 코드만 주면 실행이 중단됩니다.  
 이때는 `BIBLE_TRANSLATION_TYPE`을 지정하거나 `--entry-url`을 명시해야 합니다.
 
 `BIBLE_TRANSLATION_ID`는 엔트리 URL 선택에 쓰이지 않습니다.  
@@ -173,6 +211,26 @@ BIBLE_LANGUAGE_CODE=ko
 - chapter의 첫 절 번호가 `1`이 아니면 해당 chapter insert를 건너뜁니다.
 - 책 전체에서 절을 하나도 얻지 못하면 오류로 처리합니다. 이 시점에는 커밋된 것이 없습니다.
 - 기존 절 번호가 있으면 중복 insert 하지 않습니다.
+
+### 원문이 개정되는 경우
+
+insert가 **없는 절만** 채우는 방식이므로, 원문이 나중에 수정되어도 재실행으로는 반영되지 않습니다.
+확정 판본에는 문제가 없지만, 개정이 진행 중인 소스에서는 최초 적재본이 그대로 남습니다.
+
+원문이 바뀌었는지 확인하려면 `scripts/check_translation_drift.py`를 사용합니다. **DB에 쓰지 않습니다.**
+
+```bash
+# 1) 서버가 페이지를 언제 재생성했는지만 확인 (요청 1건)
+python3 scripts/check_translation_drift.py --entry-url <URL> --head-only
+
+# 2) 원문을 다시 파싱해 DB와 절 단위로 대조 (차이가 있으면 종료 코드 1)
+python3 scripts/check_translation_drift.py --translation-id <ID> --entry-url <URL>   --start-book 1 --end-book 1
+```
+
+차이가 확인되면 해당 번역본의 `bible_verse`와 `bible_chapter`를 지우고 다시 적재해야 합니다.
+`bible_chapter`와 `bible_verse`에는 외래 키 제약이 없으므로 **반드시 절을 먼저 지웁니다.**
+장을 먼저 지우면 절이 고아로 남아 책을 경유하는 쿼리로 찾을 수 없게 됩니다.
+전체 절차는 [docs/santa-biblia-libre-para-el-mundo-scraping-design.md](docs/santa-biblia-libre-para-el-mundo-scraping-design.md) 9.3절에 정리되어 있습니다.
 
 ## 지원 소스
 
@@ -249,6 +307,196 @@ WEB과 다른 점:
 - ASV가 본문에서 빼는 절은 스팬 자체가 없어 `(omitted)` 마커가 생성되지 않습니다. 절 번호에 구멍이 생기며, 처리 방향은 설계 문서 7절을 참고하세요.
 - 각주가 WEB보다 3~5배 많습니다.
 
+### 5. RVR1909 `ebible.org`
+
+- URL 규칙: `https://ebible.org/{역본코드}/{책코드}{장번호}.htm`
+- 책 코드는 USFM 대문자 3자(`GEN`, `PSA`, `3JN`)입니다.
+- **장 번호 자릿수가 책마다 다릅니다.** 시편만 3자리(`PSA023`), 나머지는 2자리(`GEN50`)입니다.
+- 역본 코드는 엔트리 URL의 첫 경로 세그먼트를 승계하므로 다른 eBible 역본에도 재사용됩니다.
+
+권장 엔트리 URL:
+
+```env
+RVR1909_ENTRY_URL=https://ebible.org/spaRV1909/GEN01.htm
+```
+
+저장 규칙:
+
+- 절 본문이 스팬 안에 없어, `span.verse` 마커 사이의 텍스트를 누적합니다.
+- 절 번호는 표시 텍스트가 아니라 `id` 속성(`V12`)에서 읽습니다.
+- 내비게이션(`ul.tnav`), 책 제목(`div.mt`), 저작권 표기는 제외합니다.
+- 보충어(`span.add`)는 본문으로 유지합니다.
+- **시편 표제는 절 본문에 포함됩니다.** 원문이 별도 마크업 없이 1절 안에 넣기 때문이며, WEB/ASV에서 표제를 제외한 것과 다릅니다.
+
+RV1909는 퍼블릭 도메인입니다.
+
+### 6. SBLM `ebible.org`
+
+Santa Biblia libre para el mundo. RVR1909와 같은 사이트·같은 렌더러라 URL 규칙과 절 마커 구조가 동일하며, 역본 코드만 다릅니다.
+
+```env
+SBLM_ENTRY_URL=https://ebible.org/spablm/GEN01.htm
+```
+
+RVR1909와 다른 점:
+
+- 한 장이 여러 블록(`div.p`, `div.q`, `div.q2`)으로 쪼개져 있어, 한 절이 블록 경계를 넘어갑니다. 블록이 바뀔 때 공백 하나로 이어 붙입니다.
+- 절과 절 **사이**에 표제가 들어갑니다. 시편 이합체 표제(`div.d`)와 아가 화자 표시(`div.sp`)가 그렇습니다. 제거하지 않으면 앞뒤 절 본문에 섞여 들어가는데, 절 수·번호 연속성 검사를 모두 통과하므로 자동 검증으로는 잡히지 않습니다.
+- **시편 표제는 저장하지 않습니다.** 원문이 표제를 1절 마커 밖의 별도 블록에 두기 때문이며, KJV/NKRV/WEB/ASV와 같은 처리입니다. RVR1909만 표제를 1절에 담고 있습니다.
+- 예수 말씀 서식(`span.wj`)은 본문으로 유지합니다.
+- 원문이 비워 둔 네 절(눅 17:36, 행 8:37 · 15:34 · 24:7)은 `(omitted)`로 기록합니다. WEB과 같은 절이며, 절 번호를 연속으로 유지해 진짜 누락이 실패로 드러나게 하기 위함입니다. 판정 근거는 각주의 존재이고, 각주 없이 빈 마커는 그대로 건너뜁니다. RVR1909는 이 네 절을 본문으로 갖고 있어 표기가 생기지 않습니다.
+- 각주 마커(`a.notemark`)는 각주 본문(`span.popup`)을 자식으로 품고 있어 함께 제거됩니다.
+
+**본문이 개정 중인 초안입니다.** 페이지 하단에 `Este es un borrador de traducción`이 표기되어 있고 원문이 수시로 갱신됩니다. 적재 이후의 수정은 재실행으로 반영되지 않으므로, [원문이 개정되는 경우](#원문이-개정되는-경우)의 절차를 따르세요. 퍼블릭 도메인입니다.
+
+### 7. JPNMEB `ebible.org`
+
+フリーダム・バイブル(Japanese Freedom Bible). RVR1909·SBLM과 같은 사이트·같은 렌더러이며 역본 코드만 다릅니다.
+
+```env
+JPNMEB_ENTRY_URL=https://ebible.org/jpnm/GEN01.htm
+```
+
+일본어 고유의 처리:
+
+- **블록 경계 공백을 넣지 않습니다.** 일본어는 단어 사이를 띄우지 않으므로, 스페인어·영어에 필요한 결합 공백이 여기서는 본문을 오염시킵니다(표본 절의 49%). 양쪽이 모두 CJK 문자일 때만 공백을 제거합니다.
+- **한글은 이 규칙에서 제외됩니다.** 한국어는 단어를 띄어 쓰므로, 범위에 포함하면 NKRV 본문이 망가집니다.
+- 원문이 비워 둔 다섯 절(눅 17:36, 행 8:37 · 15:34 · 24:7, **롬 16:25**)은 `(omitted)`로 기록합니다. 앞의 넷은 WEB과 같고 롬 16:25는 이 역본에만 있습니다.
+- 책명은 `ul.tnav`에서 가져옵니다. `div.mt`는 서수가 빠져 `書` 하나에 5권, `福音書` 하나에 4권이 뭉칩니다.
+
+SBLM과 마찬가지로 **개정 중 초안**(`これは翻訳の草案です`)이므로 [원문이 개정되는 경우](#원문이-개정되는-경우)의 절차가 적용됩니다. 퍼블릭 도메인입니다.
+
+### 8. KOUGO `jpn.bible`
+
+口語訳聖書(신약 1954 / 구약 1955). 일본성서협회 발행분이며 일본 기준 보호기간이 만료된 판본입니다.
+자세한 근거와 관할별 차이는 [설계 문서](docs/japanese-colloquial-1955-scraping-design.md) 1장에 있습니다.
+
+```env
+KOUGO_ENTRY_URL=https://jpn.bible/kougo/gen#1
+```
+
+이 소스만의 처리:
+
+- **페이지가 책 단위입니다.** 장 단위 URL이 없어 장 번호를 프래그먼트(`#3`)로 넘기고, 책 페이지를
+  한 번 받아 장별로 쪼개 씁니다. 전권 적재의 HTTP 요청이 **66회**뿐입니다.
+- **루비(후리가나)를 제거합니다.** 지우지 않으면 본문이 `はじめに神（かみ）は…`가 됩니다.
+  `get_text()`로 보면 멀쩡해 보이는 종류의 오염이라 파서 결과로 확인해야 합니다.
+- **병합 절 16건**은 범위의 모든 번호에 같은 본문을 저장합니다(시 132:3-5 등).
+- **분할 절 1건**(출 22:3)은 문서 순서가 아니라 `a` → `b` 순서로 합칩니다.
+- 문제 구절의 여는 괄호가 앞 절 끝에 남아 있어(19절) 다음 절 앞으로 옮깁니다.
+- 시편 표제(`<title type="psalm">`) 138개는 저장하지 않습니다. 다른 역본과 같은 처리입니다.
+
+적재 결과는 66권 / 1,189장 / **31,104절**이며 KJV와는 4개 장(시 47, 고후 13, 요삼 1, 계 12)에서만
+절 수가 다릅니다. 원문이 비워 둔 절이 없어 `(omitted)`는 0건입니다.
+
+**본문에 일본성서협회가 이후 訂正한 표현이 그대로 들어 있습니다**(「おしの霊」「らい病人」 등).
+만료된 것은 1954/1955 원본이고 訂正된 낱말에는 저작권이 남아 있어, 訂正 후 본문을 쓰려면
+협회의 허락 절차가 필요합니다.
+
+### 9. CUVT / CUVS `zh.wikisource.org`
+
+『聖經和合本』(1919). 중국어권 표준 텍스트이며 1931년 이전 발행이라 관할을 가리지 않고
+퍼블릭 도메인입니다. 자세한 근거는 [설계 문서](docs/chinese-union-version-1919-scraping-design.md) 1장에 있습니다.
+
+```env
+CUVT_ENTRY_URL=https://zh.wikisource.org/zh-hant/%E8%81%96%E7%B6%93_(%E5%92%8C%E5%90%88%E6%9C%AC)/%E5%89%B5%E4%B8%96%E8%A8%98#1
+CUVS_ENTRY_URL=https://zh.wikisource.org/zh-hans/%E8%81%96%E7%B6%93_(%E5%92%8C%E5%90%88%E6%9C%AC)/%E5%89%B5%E4%B8%96%E8%A8%98#1
+```
+
+**번체와 간체는 같은 원문입니다.** MediaWiki 자형 변환을 쓰므로 URL 접두어(`/zh-hant/`,
+`/zh-hans/`)만 다르고 장·절 구조가 완전히 동일합니다.
+
+이 소스만의 처리:
+
+- **페이지가 책 단위입니다.** jpn.bible 과 같은 책 페이지 캐시를 씁니다. 역본당 요청 66회.
+- **한 문단에 절 마커가 여럿이면 병합 절입니다**(69건). 범위의 모든 번호에 같은 본문을 넣습니다.
+- **장 제목이 한자 숫자입니다.** 표기가 불규칙해(110=一百一十, 111=一百十一) 읽기만 하고,
+  URL 프래그먼트는 아라비아 숫자를 씁니다.
+- **숫자가 아닌 `sup`은 상호참조 마커**(蘇州숫자)입니다. 절 번호가 아닙니다.
+- **시편 표제는 저장하지 않습니다**(116편). 다른 역본과 같은 처리이며, 이 소스는 표제를
+  `<small>`로 감싸 두어 분리가 가능합니다.
+- **敬空(神 앞 전각 공백)은 사라집니다.** 3,557절에 있었고 낱말은 그대로입니다.
+
+적재 결과는 역본당 66권 / 1,189장 / **31,102절**입니다. KJV 총계와 같지만 장별로는 4개 장이
+다릅니다(대상 21·22, 요 7, 요삼 1) — 절 구분 차이이고 본문 소실이 아닙니다.
+
+> eBible.org 의 `cmn-cu89s`/`cmn-cu89t` 는 1919년판이 아니라 **1988년 新標點和合本**입니다.
+> 편의는 크지만 판본과 권리 관계가 달라 채택하지 않았습니다(설계 문서 1.3).
+
+### 10. N1904 `studybible.info`
+
+『Η Καινή Διαθήκη』(Nestle 1904). 영국성서공회가 1904년에 낸 그리스어 신약 비평본문이며,
+네슬레가 1913년에 사망해 관할을 가리지 않고 퍼블릭 도메인입니다. 자세한 근거는
+[설계 문서](docs/greek-new-testament-nestle-1904-scraping-design.md) 1장에 있습니다.
+
+```env
+N1904_ENTRY_URL=https://studybible.info/Nestle/Matthew%201
+```
+
+**신약 27권만 있는 첫 역본입니다.** `bible_book`에 40~66번 27행만 넣으면 기본 실행
+(`--start-book 1 --end-book 66`)이 자연히 신약만 돌립니다. 구약 책 이름을 요청하면 이 소스는
+404가 아니라 **200에 빈 본문**을 돌려주므로, URL 빌더가 `book_order < 40`을 거부합니다.
+
+이 소스만의 처리:
+
+- **KJV 신약과 절 수가 다릅니다: −17 +2.** 비평본문이 싣지 않는 17절(마 17:21 등)이 없고,
+  Nestle이 따로 세는 2절(요삼 1:15, 계 12:18)이 있습니다. 7,957 − 17 + 2 = **7,942**입니다.
+- **절 번호에 구멍이 남습니다**(15곳 / 14개 장). 소스가 그 자리에 아무 표시도 하지 않으므로
+  `(omitted)` 마커를 쓰지 않습니다. ASV가 이미 같은 방식으로 16곳을 담고 있습니다.
+- **행 19장과 고후 13장은 구멍 없이 한 절 짧습니다.** 마지막 두 절을 합쳤기 때문이라
+  연속성 검사로는 잡히지 않고 KJV 대조로만 드러납니다.
+- **NFC로 정규화해 저장합니다.** 원문의 27%가 NFC가 아니고(U+0387 2,359개, 이형 악센트 21개),
+  그중 하나가 마태복음 1:1의 첫 낱말 `Βίβλος`라 그대로 저장하면 검색에 걸리지 않습니다.
+- **편집 괄호 `[[ ]]` `[ ]` `< >`는 그대로 둡니다**(13개 절). 네슬레 판본의 일부입니다.
+- **`language_code`는 `el`입니다.** 본문은 현대 그리스어가 아니라 코이네지만, DB가 `el`로
+  등록했습니다. `BIBLE_LANGUAGE_CODE=grc`로는 역본을 찾지 못합니다.
+
+적재 결과는 27권 / 260장 / **7,942절**입니다.
+
+> eBible.org 의 `grcbyz`는 제목이 `1904 Patriarchal Greek New Testament`라 연도가 같지만
+> **1904년 콘스탄티노폴리스 총대주교청판**으로 계보가 다릅니다. 기존 eBible 어댑터로 바로
+> 적재되기까지 해서 더 헷갈리기 쉽습니다(설계 문서 10.1).
+
+### 11. LSG1910 `ebible.org`
+
+Louis Segond 1910. 프랑스어 개신교 표준 역본의 1910년 개정판입니다. 프랑스어 위키백과와 eBible이
+퍼블릭 도메인으로 표기하고, 1931년 이전 발행이라 미국에서도 보호 대상이 아닙니다. 흔히 함께
+언급되는 1978년판(Colombe)과 2002년판(NBS)은 저작권이 있는 다른 판입니다. 근거는
+[설계 문서](docs/french-public-domain-scraping-design.md) 1장에 있습니다.
+
+```env
+LSG1910_ENTRY_URL=https://ebible.org/fraLSG/GEN01.htm
+```
+
+RVR1909·SBLM·JPNMEB와 같은 eBible 렌더러이며 역본 코드만 다릅니다.
+
+**절 번호가 KJV 체계가 아닙니다.** LSG 1910이 원래 쓰는 체계(히브리어 성경의 장·절 구분)를
+그대로 싣기 때문에 **106개 장에서 KJV와 절 수가 다릅니다.** 다른 역본은 모두 사실상 KJV
+체계라서, `(책, 장, 절)`로 역본을 나란히 놓으면 이 장들에서 한두 절씩 어긋납니다.
+
+- 긴 시편 표제가 **1절**입니다(62편). 시 3:1은 `Psaume de David. …`이고 KJV 3:1의 내용은 3:2입니다.
+  시 51·52·54·60편은 표제가 두 절입니다.
+- 20권 44개 장에서 장 경계나 절 나눔이 다릅니다(출 7–8, 욥 38–41, 욘 1–2, 막 9–10 등).
+  KJV 출 8:1은 LSG 7:26, 욘 1:17은 LSG 2:1입니다.
+- 이 표제는 번호가 붙은 정식 절이므로 **저장합니다.** 다른 역본이 버리는 표제(번호 없는
+  `div.d`)와 다릅니다.
+
+이 소스 때문에 eBible 파서에 들어간 처리:
+
+- **2단계 주 소제목(`div.ms2`)을 제거합니다.** 창 11:9와 10절 사이에 있어, 빼지 않으면
+  9절 끝에 `DEPUIS ABRAHAM JUSQU’À JOSEPH`가 붙습니다.
+- **각주 마커 양쪽이 모두 글자이면 공백 하나를 남깁니다.** 원문이 두 낱말 사이에 공백 없이
+  마커를 넣은 곳이 189곳이라(마 5:15 `et` + 마커 + `on` 등), 마커를 지우기만 하면 `eton`이
+  됩니다. 구두점이나 아포스트로피 옆의 마커는 그대로 지웁니다.
+- 각 책 1장 앞의 현대 해설(소개문)은 첫 절 마커 앞에 있어 저장되지 않습니다.
+- 상호참조 각주(9,751개)와 소제목·평행 본문 참조는 저장하지 않습니다. `— Pause.`(셀라)는 본문으로 남습니다.
+
+적재 결과는 66권 / 1,189장 / **31,170절**(구약 23,211 / 신약 7,959)이며, eBible이 밝힌 절 수와 같습니다.
+아포스트로피는 원문대로 `’`(U+2019)이므로 검색할 때 ASCII `'`와 구별됩니다.
+
+> Ostervald와 Martin은 보류했습니다. eBible의 Ostervald는 1744년판이 아니라 1996년 개정판이고,
+> studybible의 Martin은 다른 절 체계의 본문을 KJV 틀에 번호만 맞춰 넣어 92개 장이 어긋나 있습니다(설계 문서 10장).
+
 ## 네트워크와 재시도
 
 - `429`, `502`, `503`, `504` 응답은 자동 재시도합니다.
@@ -256,6 +504,7 @@ WEB과 다른 점:
 - 본문에 `Too Many Requests`, `429 Error` 같은 마커가 있는 200 응답도 재시도 대상으로 처리합니다.
 - 요청 성공 후에는 throttle을 서서히 낮추고, 실패가 누적되면 요청 간 대기 시간을 늘립니다.
 - chapter 간에는 scraper 내부의 polite delay가 적용되고, book 간에는 추가로 5초 대기합니다.
+- 응답 `Content-Type`에 charset이 없으면 본문 기반 추정으로 디코딩합니다. eBible이 여기 해당하며, 이 처리가 없으면 스페인어 악센트가 전부 깨집니다.
 - BibleGateway는 `robots.txt`에 `Crawl-delay: 15`를 명시하므로, 이 소스에서는 요청 간격 하한이 15초로 강제됩니다.
   - 생성자에 더 짧은 값을 넘겨도 15초 미만으로 내려가지 않습니다.
   - 66권 전권 적재는 1,189 요청이며 약 5시간이 걸립니다.

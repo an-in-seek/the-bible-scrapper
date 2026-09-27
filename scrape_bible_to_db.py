@@ -20,15 +20,33 @@ ENTRY_URL_ENV_BY_TRANSLATION_TYPE = {
     "NKRV": "NKRV_ENTRY_URL",
     "WEB": "WEB_ENTRY_URL",
     "ASV": "ASV_ENTRY_URL",
+    "RVR1909": "RVR1909_ENTRY_URL",
+    "SBLM": "SBLM_ENTRY_URL",
+    "JPNMEB": "JPNMEB_ENTRY_URL",
+    "KOUGO": "KOUGO_ENTRY_URL",
+    "CUVT": "CUVT_ENTRY_URL",
+    "CUVS": "CUVS_ENTRY_URL",
+    "N1904": "N1904_ENTRY_URL",
+    "LSG1910": "LSG1910_ENTRY_URL",
 }
 # A language code alone does not identify a source: 'en' covers KJV, WEB and ASV.
 TRANSLATION_TYPES_BY_LANGUAGE_CODE = {
     "ko": ("NKRV",),
     "en": ("KJV", "WEB", "ASV"),
+    "es": ("RVR1909", "SBLM"),
+    "ja": ("JPNMEB", "KOUGO"),
+    "zh": ("CUVT", "CUVS"),
+    # The text is Koine, but bible_translation stores 'el': the DB's language_code CHECK
+    # admits 'el' and not 'grc'. A Modern Greek translation added later would share it.
+    "el": ("N1904",),
+    "fr": ("LSG1910",),
 }
 LEGACY_TRANSLATION_TYPE_BY_ID = {"2": "NKRV"}
 # Tie-break when nothing else narrows it down; keeps the pre-WEB default.
-ENTRY_URL_PREFERENCE_ORDER = ("NKRV", "KJV", "WEB", "ASV")
+ENTRY_URL_PREFERENCE_ORDER = (
+    "NKRV", "KJV", "WEB", "ASV", "RVR1909", "SBLM", "JPNMEB", "KOUGO", "CUVT", "CUVS",
+    "N1904", "LSG1910",
+)
 # Which source may legitimately produce each translation, and how to recognise the
 # translation when bible_translation.translation_type is empty. Drives the
 # source/translation check in both directions, so adding a translation is one row.
@@ -56,6 +74,66 @@ TRANSLATION_SOURCE_REQUIREMENTS = {
         "version": "ASV",
         "name": "American Standard Version",
         "language_code": "en",
+    },
+    "RVR1909": {
+        # eBible serves more than one translation, so the version token comes from the
+        # URL path (see HolyBibleScraper.get_source_version), not the query string.
+        "source": "ebible",
+        "version": "spaRV1909",
+        "name": "Reina Valera 1909",
+        "language_code": "es",
+    },
+    "SBLM": {
+        "source": "ebible",
+        "version": "spablm",
+        "name": "Santa Biblia libre para el mundo",
+        "language_code": "es",
+    },
+    "JPNMEB": {
+        "source": "ebible",
+        "version": "jpnm",
+        "name": "フリーダム・バイブル",
+        "language_code": "ja",
+    },
+    "KOUGO": {
+        # jpn.bible puts the translation code in the path (/kougo/), like eBible.
+        "source": "jpnbible",
+        "version": "kougo",
+        "name": "口語訳聖書",
+        "language_code": "ja",
+    },
+    "CUVT": {
+        # zh.wikisource puts the script variant in the path (/zh-hant/, /zh-hans/), so
+        # the version token is that segment - the two translations are one source.
+        "source": "wikisource",
+        "version": "zh-hant",
+        "name": "聖經和合本",
+        "language_code": "zh",
+    },
+    "CUVS": {
+        "source": "wikisource",
+        "version": "zh-hans",
+        "name": "圣经和合本",
+        "language_code": "zh",
+    },
+    "N1904": {
+        # studybible.info serves more than sixty translations from one host and puts the
+        # version in the first path segment, so leaving `version` empty here would let
+        # /KJV/Matthew 1 load as N1904.
+        "source": "studybible",
+        "version": "Nestle",
+        # Must match bible_translation.name exactly: _translation_type_by_identity()
+        # recovers the translation from (name, language_code).
+        "name": "Η Καινή Διαθήκη (Nestle 1904)",
+        "language_code": "el",
+    },
+    "LSG1910": {
+        # The fourth eBible translation: without `version` the four would pass as each
+        # other. Its verse numbering is the edition's own (Hebrew-style), not KJV's.
+        "source": "ebible",
+        "version": "fraLSG",
+        "name": "Louis Segond 1910",
+        "language_code": "fr",
     },
 }
 
@@ -180,9 +258,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--entry-url",
         default=None,
+        # Built from the table so a new translation cannot leave this text stale.
         help=(
-            "Source entry URL "
-            "(default: env KJV_ENTRY_URL, NKRV_ENTRY_URL, WEB_ENTRY_URL, or built-in default)"
+            "Source entry URL (default: env "
+            + ", ".join(ENTRY_URL_ENV_BY_TRANSLATION_TYPE.values())
+            + ", or built-in default)"
         ),
     )
     parser.add_argument(
@@ -281,13 +361,19 @@ def resolve_books(
     return repo.fetch_books(conn, resolved_start, end_book)
 
 
+def _version_matches(required: str | None, actual: str | None) -> bool:
+    """eBible translation codes are mixed case ("spaRV1909"), so compare case-insensitively."""
+    if required is None:
+        return True
+    return actual is not None and required.lower() == actual.lower()
+
+
 def _expected_translation_type(source_name: str, version: str | None) -> str | None:
     """Translation this source/version combination is expected to produce."""
     for translation_type, requirement in TRANSLATION_SOURCE_REQUIREMENTS.items():
         if requirement["source"] != source_name:
             continue
-        required_version = requirement["version"]
-        if required_version is None or required_version == version:
+        if _version_matches(requirement["version"], version):
             return translation_type
     return None
 
@@ -313,9 +399,7 @@ def validate_source_translation_compatibility(
     """
     metadata = repo.get_translation_metadata(conn)
     source_name = scraper.get_source_name()
-    parsed_entry = urlparse(scraper.entry_url)
-    query_params = dict(parse_qsl(parsed_entry.query, keep_blank_values=True))
-    version = query_params.get("version")
+    version = scraper.get_source_version()
 
     translation_type = str(metadata.get("translation_type") or "")
     translation_name = str(metadata.get("name") or "")
@@ -376,7 +460,7 @@ def validate_source_translation_compatibility(
             f"Resolved translation metadata={metadata}"
         )
 
-    if requirement["version"] is not None and version is not None and requirement["version"] != version:
+    if version is not None and not _version_matches(requirement["version"], version):
         raise RuntimeError(
             f"Source/translation mismatch: translation_type={translation_type!r} requires "
             f"version={requirement['version']!r}, but the entry URL uses version={version!r}. "
