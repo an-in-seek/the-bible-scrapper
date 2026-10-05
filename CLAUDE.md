@@ -22,6 +22,7 @@ Supported sources:
 | `zh.wikisource.org` (`zh-hans`) | CUVS (圣经和合本 1919, Chinese simplified) | Implemented |
 | `studybible.info` (`Nestle`) | N1904 (Nestle 1904 Greek NT, New Testament only) | Implemented |
 | `ebible.org` (`fraLSG`) | LSG1910 (Louis Segond 1910, French, own verse numbering) | Implemented |
+| `biblegateway.com` (`version=NIV`) | NIV (New International Version 2011) — **copyrighted** | Parser and wiring only; **not loaded** |
 
 Design documents:
 
@@ -36,6 +37,7 @@ Design documents:
 - [docs/chinese-union-version-1919-scraping-design.md](docs/chinese-union-version-1919-scraping-design.md) — CUVT/CUVS (和合本 1919)
 - [docs/greek-new-testament-nestle-1904-scraping-design.md](docs/greek-new-testament-nestle-1904-scraping-design.md) — N1904 (Nestle 1904 Greek NT), and why Rahlfs LXX 1935 is rejected
 - [docs/french-public-domain-scraping-design.md](docs/french-public-domain-scraping-design.md) — LSG1910 (Louis Segond 1910, French), and why Ostervald and Martin are on hold
+- [docs/new-international-version-scraping-design.md](docs/new-international-version-scraping-design.md) — NIV (copyrighted; parser and wiring done, **not loaded** — loading is a separate decision), plus the `h4` contamination found in the stored WEB/ASV text
 
 ## Common commands
 
@@ -46,9 +48,9 @@ pytest -q -k bskorea                         # single group
 bash scripts/run_tests_wsl.sh                # WSL: create venv, install, run tests
 python3 scripts/check_translation_drift.py --entry-url <URL> --head-only   # source Last-Modified
 python3 scripts/check_translation_drift.py --translation-id <ID> --entry-url <URL>  # read-only diff
+python3 scripts/check_translation_drift.py --translation-id <ID> --entry-url <URL> --output drift.jsonl  # every diff, uncapped
 python3 scrape_bible_to_db.py --test-genesis1              # parser-only check, no DB
 python3 scrape_bible_to_db.py --test-book 3 --test-chapter 11
-python3 scripts/check_translation_drift.py --translation-id <ID> --entry-url <URL> --output drift.jsonl  # every diff, uncapped
 python3 scrape_bible_to_db.py --start-book 1 --end-book 3  # actual load
 ```
 
@@ -95,8 +97,9 @@ bskorea → biblegateway → ebible → jpnbible → wikisource → studybible �
 - **Source-specific parsers go first, generic inference parsers last.** If `_extract_verses_from_structured_nodes()` runs first, it misreads menus, footnotes, and dropdown text as verses.
 - A source-specific parser must **return `[]`** when the page is not its source, so the chain can continue. It must not raise.
 - `_extract_verses_from_bskorea_read_page()` calls `get_text("")` with no separator on purpose. Using `" "` splits Korean particles (e.g. `모세가` becomes `모세 가`).
-- `h3` / `h4.psalm-title` removal is **not dead code**: ASV tags editorial headings and psalm superscriptions with the verse-1 class, so dropping the rule silently prepends them to verse 1. WEB pages contain no `h3` at all, which is why only the ASV tests cover it.
-- `_extract_verses_from_biblegateway_passage()` reads verse numbers from the `span.text` **class token** (`Gen-2-1`), never from the rendered number: the first verse of a chapter displays the *chapter* number, so Genesis 2:1 would be stored as verse 2. It also merges same-numbered spans instead of deduplicating them (Psalms 23:4 arrives in four fragments) and drops `h4.psalm-title`, which carries the verse-1 class.
+- `h3` / `h4` removal is **not dead code**: BibleGateway tags every heading with the class of the verse it precedes, so the parser folds a kept heading into that verse. ASV uses `h3` for editorial headings; `h4` comes in four kinds — `h4.psalm-title` (WEB/ASV superscription), a classless `h4` (NIV superscription), `h4.psalm-acrostic` (ASV/NIV Psalm 119 `א Aleph.`) and `h4.speaker` (WEB/NIV Song of Songs `Beloved`, sometimes **mid-verse**). The rule used to name only `h4.psalm-title`, and ASV Psalm 119 (22 verses) and WEB Song of Songs (27+) were loaded with the labels; every count check passed. Do not narrow it back to a class list. `p.translation-note` is NIV's bracketed note before Mark 16:9 and John 7:53, tagged with the next verse's class.
+- `span.small-caps` is uppercased. NIV writes LORD as lowercase `Lord` plus CSS small caps, and the cross inscriptions (Mark 15:26, Luke 23:38) entirely in lowercase; storing the HTML text would lose the LORD/Lord distinction KJV keeps.
+- `_extract_verses_from_biblegateway_passage()` reads verse numbers from the `span.text` **class token** (`Gen-2-1`), never from the rendered number: the first verse of a chapter displays the *chapter* number, so Genesis 2:1 would be stored as verse 2. It also merges same-numbered spans instead of deduplicating them (Psalms 23:4 arrives in four fragments) and drops every `h4`, which carry verse classes.
 - `_extract_verses_from_ebible_page()` accumulates text **between** `span.verse` markers: on eBible the marker holds only the number and the body follows as sibling nodes. Verse numbers come from the `id` (`V12`), and chapter URLs pad the number per book — Psalms to three digits, everything else to two (`PSA23.htm` is a 404).
 - `EBIBLE_REMOVABLE_SELECTOR` drops `div.d`, `div.qa`, `div.qd`, and `div.sp` because those headings sit **between** verse markers, so the accumulator folds them into the surrounding verse — measured on spablm as 21 leaked verses in Psalms 119 and 8 in Song of Songs 1. The contamination passes every automated check (verse count, contiguity, no empty verses), so only a targeted query or a human catches it. The same goes for `div.ms2`: fraLSG puts one between Genesis 11:9 and 11:10, and before it was listed verse 9 ended in `DEPUIS ABRAHAM JUSQU’À JOSEPH`. Never drop `div.q`/`div.q2`/`div.b`/`div.qs` (they hold poetry text; `div.qs` is LSG's `— Pause.`) or `span.wj` (words of Jesus).
 - A `div.d` before the first verse marker is a **psalm superscription**, and it is deliberately not stored — matching KJV, NKRV, WEB, and ASV. RVR1909 is the lone exception only because that source inlines the superscription into verse 1 where the parser cannot separate it. Do not "fix" the difference by prepending it.
@@ -146,7 +149,7 @@ Skipping step 7 lets, for example, WEB text land under the KJV translation — e
 - `.env` is loaded with `os.environ.setdefault()`, so **shell environment variables win**.
 - Translation resolution order: `BIBLE_TRANSLATION_ID` → lookup by (`BIBLE_TRANSLATION_TYPE`, `BIBLE_TRANSLATION_NAME`, `BIBLE_LANGUAGE_CODE`) → legacy default `translation_id=10`.
 - That **legacy fallback of 10 is a trap**: with no variables set, data is silently written to translation 10.
-- Entry URL comes from `KJV_ENTRY_URL` / `NKRV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` / `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` / `JPNMEB_ENTRY_URL` / `KOUGO_ENTRY_URL` / `CUVT_ENTRY_URL` / `CUVS_ENTRY_URL` / `N1904_ENTRY_URL` / `LSG1910_ENTRY_URL`. A language code no longer identifies a source on its own: `en` covers KJV/WEB/ASV, `es` covers RVR1909/SBLM, `ja` covers JPNMEB/KOUGO and `zh` covers CUVT/CUVS, so with more than one URL of that language set, resolution raises rather than guessing. `el` currently maps to N1904 alone. The text is Koine, not Modern Greek, but the DB registered it as `el` and its `language_code` CHECK admits `el`, not `grc` — so `BIBLE_LANGUAGE_CODE=grc` finds no translation. A Modern Greek translation added later would share `el` with N1904. `fr` maps to LSG1910 alone. `BIBLE_TRANSLATION_ID` does **not** steer entry-URL selection, so an ID-only run can silently pick the wrong source; pass `BIBLE_TRANSLATION_TYPE` or `--entry-url`.
+- Entry URL comes from `KJV_ENTRY_URL` / `NKRV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` / `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` / `JPNMEB_ENTRY_URL` / `KOUGO_ENTRY_URL` / `CUVT_ENTRY_URL` / `CUVS_ENTRY_URL` / `N1904_ENTRY_URL` / `LSG1910_ENTRY_URL` / `NIV_ENTRY_URL`. A language code no longer identifies a source on its own: `en` covers KJV/WEB/ASV/NIV, `es` covers RVR1909/SBLM, `ja` covers JPNMEB/KOUGO and `zh` covers CUVT/CUVS, so with more than one URL of that language set, resolution raises rather than guessing. `el` currently maps to N1904 alone. The text is Koine, not Modern Greek, but the DB registered it as `el` and its `language_code` CHECK admits `el`, not `grc` — so `BIBLE_LANGUAGE_CODE=grc` finds no translation. A Modern Greek translation added later would share `el` with N1904. `fr` maps to LSG1910 alone. `BIBLE_TRANSLATION_ID` does **not** steer entry-URL selection, so an ID-only run can silently pick the wrong source; pass `BIBLE_TRANSLATION_TYPE` or `--entry-url`.
 - Never hardcode DB credentials (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`).
 
 ### CLI argument constraints

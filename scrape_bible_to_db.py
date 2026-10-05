@@ -28,11 +28,12 @@ ENTRY_URL_ENV_BY_TRANSLATION_TYPE = {
     "CUVS": "CUVS_ENTRY_URL",
     "N1904": "N1904_ENTRY_URL",
     "LSG1910": "LSG1910_ENTRY_URL",
+    "NIV": "NIV_ENTRY_URL",
 }
-# A language code alone does not identify a source: 'en' covers KJV, WEB and ASV.
+# A language code alone does not identify a source: 'en' covers KJV, WEB, ASV and NIV.
 TRANSLATION_TYPES_BY_LANGUAGE_CODE = {
     "ko": ("NKRV",),
-    "en": ("KJV", "WEB", "ASV"),
+    "en": ("KJV", "WEB", "ASV", "NIV"),
     "es": ("RVR1909", "SBLM"),
     "ja": ("JPNMEB", "KOUGO"),
     "zh": ("CUVT", "CUVS"),
@@ -45,7 +46,7 @@ LEGACY_TRANSLATION_TYPE_BY_ID = {"2": "NKRV"}
 # Tie-break when nothing else narrows it down; keeps the pre-WEB default.
 ENTRY_URL_PREFERENCE_ORDER = (
     "NKRV", "KJV", "WEB", "ASV", "RVR1909", "SBLM", "JPNMEB", "KOUGO", "CUVT", "CUVS",
-    "N1904", "LSG1910",
+    "N1904", "LSG1910", "NIV",
 )
 # Which source may legitimately produce each translation, and how to recognise the
 # translation when bible_translation.translation_type is empty. Drives the
@@ -134,6 +135,15 @@ TRANSLATION_SOURCE_REQUIREMENTS = {
         "version": "fraLSG",
         "name": "Louis Segond 1910",
         "language_code": "fr",
+    },
+    "NIV": {
+        # Copyrighted (Biblica), unlike every other row here; see the design doc before
+        # loading. Without this row `version=NIV` has no expected translation, so any
+        # translation_type missing from this table would pass the check.
+        "source": "biblegateway",
+        "version": "NIV",
+        "name": "New International Version",
+        "language_code": "en",
     },
 }
 
