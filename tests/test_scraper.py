@@ -586,6 +586,115 @@ def test_parse_verses_from_biblegateway_handles_asv_chapter_without_verse_span()
     assert all(verse.text != "(omitted)" for verse in verses)
 
 
+BIBLEGATEWAY_NIV_ENTRY_URL = "https://www.biblegateway.com/passage/?search=Genesis%201&version=NIV"
+
+
+def test_parse_verses_from_biblegateway_drops_classless_psalm_title() -> None:
+    # NIV's superscription is an <h4> with no class at all, so a rule naming
+    # h4.psalm-title lets it through into verse 1. Fixture text is made up.
+    html = """
+    <div class="passage-text"><div class="passage-content"><div class="version-NIV">
+      <h3><span class="text Ps-3-1">Psalm 3</span></h3>
+      <h4><span class="text Ps-3-1">A song of the fixture writer.</span></h4>
+      <div class="poetry"><p class="line">
+        <span class="text Ps-3-1"><sup class="versenum">1 </sup>First line of the verse,</span><br/>
+        <span class="indent-1"><span class="text Ps-3-1">second line of the verse.</span></span><br/>
+        <span class="text Ps-3-2"><sup class="versenum">2 </sup>Next verse.</span>
+      </p></div>
+    </div></div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_NIV_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [1, 2]
+    assert verses[0].text == "First line of the verse, second line of the verse."
+
+
+def test_parse_verses_from_biblegateway_drops_acrostic_stanza_heading() -> None:
+    # ASV and NIV head each Psalm 119 stanza with h4.psalm-acrostic tagged with the
+    # stanza's first verse; ASV was stored with "א Aleph." on 22 verses.
+    html = """
+    <div class="passage-text"><div class="passage-content"><div class="version-ASV">
+      <h4 class="psalm-acrostic"><span class="text Ps-119-9">ב Beth.</span></h4>
+      <div class="poetry"><p class="line">
+        <span class="text Ps-119-9"><sup class="versenum">9 </sup>Opening verse of the stanza.</span><br/>
+        <span class="text Ps-119-10"><sup class="versenum">10 </sup>Second verse of the stanza.</span>
+      </p></div>
+    </div></div></div>
+    """
+    scraper = HolyBibleScraper(
+        entry_url="https://www.biblegateway.com/passage/?search=Psalms%20119&version=ASV"
+    )
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [9, 10]
+    assert verses[0].text == "Opening verse of the stanza."
+
+
+def test_parse_verses_from_biblegateway_drops_speaker_label_inside_a_verse() -> None:
+    # WEB and NIV label Song of Songs speakers with h4.speaker. When the speaker
+    # changes mid-verse the heading sits between two fragments of the same verse, so
+    # it would be stored in the middle of the text where no prefix check finds it.
+    html = """
+    <div class="passage-text"><div class="passage-content"><div class="version-WEB">
+      <h4 class="speaker"><span class="text Song-1-4">Beloved</span></h4>
+      <div class="poetry"><p class="line">
+        <span class="text Song-1-4"><sup class="versenum">4 </sup>First speaker's half.</span>
+      </p></div>
+      <h4 class="speaker"><span class="text Song-1-4">Friends</span></h4>
+      <div class="poetry"><p class="line">
+        <span class="text Song-1-4">Second speaker's half.</span><br/>
+        <span class="text Song-1-5"><sup class="versenum">5 </sup>Following verse.</span>
+      </p></div>
+    </div></div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [4, 5]
+    assert verses[0].text == "First speaker's half. Second speaker's half."
+
+
+def test_parse_verses_from_biblegateway_drops_translation_note_before_a_verse() -> None:
+    # NIV's "[The earliest manuscripts…]" note before Mark 16:9 and John 7:53 carries
+    # the class of the verse after it. Removing p.translation-note is what keeps it out.
+    html = """
+    <div class="passage-text"><div class="passage-content"><div class="version-NIV">
+      <p><span class="text Mark-16-8"><sup class="versenum">8 </sup>Verse before the note.</span></p>
+      <p class="translation-note center top-1"><span class="text Mark-16-9">[A bracketed editorial note.]</span></p>
+      <p class="top-1"><span class="text Mark-16-9"><i><sup class="versenum">9 </sup>Verse after the note.</i></span></p>
+    </div></div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_NIV_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [8, 9]
+    assert verses[1].text == "Verse after the note."
+
+
+def test_parse_verses_from_biblegateway_uppercases_small_caps() -> None:
+    # NIV's LORD is lowercase "Lord" in the HTML plus CSS small caps, and so is the
+    # cross inscription. Only the small-caps span changes; a plain "Lord" stays.
+    html = """
+    <div class="passage-text"><div class="passage-content"><div class="version-NIV">
+      <p>
+        <span class="text Gen-2-4"><sup class="versenum">4 </sup>When the <span class="small-caps" style="font-variant: small-caps">Lord</span> God made it, my Lord said so.</span>
+        <span class="text Gen-2-5"><sup class="versenum">5 </sup>It read: <span class="small-caps" style="font-variant: small-caps">the king of<sup class="footnote">[<a href="#f">a</a>]</sup> the fixture</span>.</span>
+      </p>
+    </div></div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_NIV_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert verses[0].text == "When the LORD God made it, my Lord said so."
+    assert verses[1].text == "It read: THE KING OF THE FIXTURE."
+
+
 EBIBLE_ENTRY_URL = "https://ebible.org/spaRV1909/GEN01.htm"
 
 EBIBLE_CHAPTER_HTML = """

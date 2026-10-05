@@ -588,6 +588,99 @@ def test_validate_source_translation_compatibility_rejects_unmapped_version_with
         raise AssertionError("expected RuntimeError")
 
 
+BIBLEGATEWAY_NIV_ENTRY_URL = "https://www.biblegateway.com/passage/?search=Genesis%201&version=NIV"
+
+NIV_TRANSLATION_METADATA = {
+    "id": 11,
+    "language_code": "en",
+    "name": "New International Version",
+    "translation_type": "NIV",
+}
+
+
+def test_validate_source_translation_compatibility_for_biblegateway_niv() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(NIV_TRANSLATION_METADATA)
+    scraper = BibleGatewayScraper(BIBLEGATEWAY_NIV_ENTRY_URL)
+
+    validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+
+
+def test_validate_source_translation_compatibility_separates_niv_from_other_biblegateway_translations() -> None:
+    """NIV must pass for none of the other BibleGateway rows, nor for an English row the
+    table does not know (ESV is in the DB with no source): before NIV had its own row,
+    `version=NIV` had no expected translation and that last pair passed."""
+    esv_metadata = {"id": 12, "language_code": "en", "name": "English Standard Version", "translation_type": "ESV"}
+    pairs = [
+        (BIBLEGATEWAY_NIV_ENTRY_URL, WEB_TRANSLATION_METADATA),
+        (BIBLEGATEWAY_NIV_ENTRY_URL, ASV_TRANSLATION_METADATA),
+        (BIBLEGATEWAY_NIV_ENTRY_URL, esv_metadata),
+        (BIBLEGATEWAY_WEB_ENTRY_URL, NIV_TRANSLATION_METADATA),
+        (BIBLEGATEWAY_ASV_ENTRY_URL, NIV_TRANSLATION_METADATA),
+        # NIVUK is a different edition on the same site.
+        ("https://www.biblegateway.com/passage/?search=Genesis%201&version=NIVUK", NIV_TRANSLATION_METADATA),
+    ]
+    for entry_url, metadata in pairs:
+        repo = FakeRepo()
+        conn = FakeConn()
+        conn.translation_metadata = dict(metadata)
+        scraper = BibleGatewayScraper(entry_url)
+        try:
+            validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+        except RuntimeError as exc:
+            assert "Source/translation mismatch" in str(exc)
+        else:
+            raise AssertionError(f"expected RuntimeError for {entry_url} + {metadata['translation_type']}")
+
+
+def test_validate_source_translation_compatibility_rejects_thekingsbible_with_niv() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(NIV_TRANSLATION_METADATA)
+
+    class KingsBibleScraper(FakeScraper):
+        def get_source_name(self) -> str:
+            return "thekingsbible"
+
+    scraper = KingsBibleScraper("https://thekingsbible.com/Bible/1/1")
+
+    try:
+        validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+    except RuntimeError as exc:
+        assert "Source/translation mismatch" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_resolve_default_entry_url_prefers_niv_when_translation_type_is_niv() -> None:
+    with _with_entry_url_env(
+        {
+            "KJV_ENTRY_URL": "https://thekingsbible.com/Bible/1/1",
+            "WEB_ENTRY_URL": BIBLEGATEWAY_WEB_ENTRY_URL,
+            "NIV_ENTRY_URL": BIBLEGATEWAY_NIV_ENTRY_URL,
+            "BIBLE_TRANSLATION_TYPE": "NIV",
+        }
+    ):
+        assert resolve_default_entry_url() == BIBLEGATEWAY_NIV_ENTRY_URL
+
+
+def test_resolve_default_entry_url_rejects_english_ambiguity_with_niv() -> None:
+    with _with_entry_url_env(
+        {
+            "ASV_ENTRY_URL": BIBLEGATEWAY_ASV_ENTRY_URL,
+            "NIV_ENTRY_URL": BIBLEGATEWAY_NIV_ENTRY_URL,
+            "BIBLE_LANGUAGE_CODE": "en",
+        }
+    ):
+        try:
+            resolve_default_entry_url()
+        except ValueError as exc:
+            assert "Ambiguous entry URL" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")
+
+
 EBIBLE_RV1909_ENTRY_URL = "https://ebible.org/spaRV1909/GEN01.htm"
 EBIBLE_SBLM_ENTRY_URL = "https://ebible.org/spablm/GEN01.htm"
 EBIBLE_JPNMEB_ENTRY_URL = "https://ebible.org/jpnm/GEN01.htm"

@@ -29,6 +29,7 @@
 - CUVT/CUVS: [docs/chinese-union-version-1919-scraping-design.md](docs/chinese-union-version-1919-scraping-design.md)
 - N1904: [docs/greek-new-testament-nestle-1904-scraping-design.md](docs/greek-new-testament-nestle-1904-scraping-design.md)
 - LSG1910(프랑스어; Ostervald · Martin은 보류): [docs/french-public-domain-scraping-design.md](docs/french-public-domain-scraping-design.md)
+- NIV(저작권 역본, 미적재): [docs/new-international-version-scraping-design.md](docs/new-international-version-scraping-design.md)
 
 ## 주요 특징
 
@@ -63,6 +64,7 @@
 - `docs/chinese-union-version-1919-scraping-design.md`: CUVT/CUVS(중국어 和合本 1919) 설계 문서
 - `docs/greek-new-testament-nestle-1904-scraping-design.md`: N1904(그리스어 신약 Nestle 1904) 설계 문서. Rahlfs LXX 1935 불채택 근거 포함
 - `docs/french-public-domain-scraping-design.md`: LSG1910(프랑스어 Louis Segond 1910) 설계 문서. Ostervald·Martin 보류 근거 포함
+- `docs/new-international-version-scraping-design.md`: NIV 설계 문서 (저작권 역본. 파서·배선만 구현, 미적재). 기존 WEB·ASV의 `h4` 오염 발견 기록 포함
 
 ## 요구 사항
 
@@ -121,22 +123,22 @@ CUVS_ENTRY_URL=https://zh.wikisource.org/zh-hans/%E8%81%96%E7%B6%93_(%E5%92%8C%E
 
 `--entry-url`를 지정하지 않으면 기본 URL은 아래 순서로 결정됩니다.
 
-1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JPNMEB` / `KOUGO` / `CUVT` / `CUVS` / `N1904` / `LSG1910`)에 해당하는 환경변수
+1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JPNMEB` / `KOUGO` / `CUVT` / `CUVS` / `N1904` / `LSG1910` / `NIV`)에 해당하는 환경변수
 2. `BIBLE_TRANSLATION_ID=2` 또는 `BIBLE_TRANSLATION_NAME=개역개정`이면 `NKRV_ENTRY_URL`
 3. `BIBLE_LANGUAGE_CODE`로 좁혀지는 소스가 하나면 그 값
    - `ko` -> `NKRV_ENTRY_URL`
-   - `en` -> `KJV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` 중 설정된 것
+   - `en` -> `KJV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` / `NIV_ENTRY_URL` 중 설정된 것
    - `es` -> `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` 중 설정된 것
    - `ja` -> `JPNMEB_ENTRY_URL` / `KOUGO_ENTRY_URL` 중 설정된 것
    - `zh` -> `CUVT_ENTRY_URL` / `CUVS_ENTRY_URL` 중 설정된 것
    - `el` -> `N1904_ENTRY_URL` (본문은 코이네 그리스어지만 DB의 `language_code` CHECK가 `grc`가 아닌 `el`을 허용하므로 `el`로 등록되어 있습니다)
    - `fr` -> `LSG1910_ENTRY_URL`
 4. 설정된 엔트리 URL이 하나뿐이면 그 값
-5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JPNMEB` -> `KOUGO` -> `CUVT` -> `CUVS` -> `N1904` -> `LSG1910` 순으로 선택
+5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JPNMEB` -> `KOUGO` -> `CUVT` -> `CUVS` -> `N1904` -> `LSG1910` -> `NIV` 순으로 선택
 6. 아무것도 없으면 내장 기본값 `https://thekingsbible.com/Bible/1/1` 사용
 
 주의: `BIBLE_LANGUAGE_CODE`만으로는 소스가 특정되지 않습니다.  
-`en`(KJV / WEB / ASV), `es`(RVR1909 / SBLM), `ja`(JPNMEB / KOUGO), `zh`(CUVT / CUVS) 모두 소스가 둘 이상이라,  
+`en`(KJV / WEB / ASV / NIV), `es`(RVR1909 / SBLM), `ja`(JPNMEB / KOUGO), `zh`(CUVT / CUVS) 모두 소스가 둘 이상이라,  
 해당 엔트리 URL이 여러 개 설정된 상태에서 언어 코드만 주면 실행이 중단됩니다.  
 이때는 `BIBLE_TRANSLATION_TYPE`을 지정하거나 `--entry-url`을 명시해야 합니다.
 
@@ -225,7 +227,13 @@ python3 scripts/check_translation_drift.py --entry-url <URL> --head-only
 
 # 2) 원문을 다시 파싱해 DB와 절 단위로 대조 (차이가 있으면 종료 코드 1)
 python3 scripts/check_translation_drift.py --translation-id <ID> --entry-url <URL>   --start-book 1 --end-book 1
+
+# 3) 차이를 빠짐없이 파일로 남기기 (화면 출력은 --max-report 건에서 잘림)
+python3 scripts/check_translation_drift.py --translation-id <ID> --entry-url <URL> --output drift.jsonl
 ```
+
+DB 조회는 장마다 읽기 전용 트랜잭션으로 끝내고 페이지를 받습니다. 전권 대조는 몇 시간이 걸리는데,
+트랜잭션 하나를 그동안 열어 두면 트랜잭션 풀러의 백엔드를 붙잡고 `ALTER TABLE`을 막기 때문입니다.
 
 차이가 확인되면 해당 번역본의 `bible_verse`와 `bible_chapter`를 지우고 다시 적재해야 합니다.
 `bible_chapter`와 `bible_verse`에는 외래 키 제약이 없으므로 **반드시 절을 먼저 지웁니다.**
@@ -304,6 +312,7 @@ ASV_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=A
 WEB과 다른 점:
 
 - ASV는 편집자 소제목(`h3`)과 시편 표제(`h4.psalm-title`)를 함께 사용하며, 둘 다 1절 클래스를 갖습니다. 파서가 제거하므로 절 본문에 섞이지 않습니다.
+- `h4`는 클래스와 관계없이 모두 제거합니다. 시 119편의 히브리 자모(`h4.psalm-acrostic`, ASV·NIV)와 아가의 화자 표시(`h4.speaker`, WEB·NIV)도 다음 절의 클래스를 달고 있어서, 남겨 두면 절 앞이나 절 중간에 섞입니다. 예전 규칙은 `h4.psalm-title`만 지워서 ASV 시 119편과 WEB 아가가 오염된 채 적재됐습니다. 보정 절차는 [NIV 설계 문서](docs/new-international-version-scraping-design.md) 8절에 있습니다.
 - ASV가 본문에서 빼는 절은 스팬 자체가 없어 `(omitted)` 마커가 생성되지 않습니다. 절 번호에 구멍이 생기며, 처리 방향은 설계 문서 7절을 참고하세요.
 - 각주가 WEB보다 3~5배 많습니다.
 
@@ -496,6 +505,17 @@ RVR1909·SBLM·JPNMEB와 같은 eBible 렌더러이며 역본 코드만 다릅�
 
 > Ostervald와 Martin은 보류했습니다. eBible의 Ostervald는 1744년판이 아니라 1996년 개정판이고,
 > studybible의 Martin은 다른 절 체계의 본문을 KJV 틀에 번호만 맞춰 넣어 92개 장이 어긋나 있습니다(설계 문서 10장).
+
+### 12. NIV `biblegateway.com` — 미적재
+
+New International Version(2011)은 **저작권 역본**입니다(Biblica). 이 저장소의 다른 역본은 모두 퍼블릭 도메인입니다.
+엔트리 URL 해석과 소스/역본 검증에 NIV가 등록되어 있고, 파서도 NIV 페이지를 처리합니다(`h4` 제거, small caps 대문자화).
+하지만 **전권 적재는 하지 않았습니다.** Biblica의 무허가 인용 한도(500절)와 BibleGateway 이용약관을 넘기 때문에
+별도 결정 사항으로 두었습니다. 근거와 실측 결과는 [설계 문서](docs/new-international-version-scraping-design.md)에 있습니다.
+
+```env
+NIV_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=NIV
+```
 
 ## 네트워크와 재시도
 

@@ -74,11 +74,16 @@ BIBLEGATEWAY_CRAWL_DELAY_SECONDS = 15.0
 # Verse spans carry an "OSIS-chapter-verse" class token, e.g. "Gen-1-1", "1Sam-1-23".
 # The book abbreviation differs from the search name, so only the numbers are used.
 BIBLEGATEWAY_VERSE_CLASS_PATTERN = re.compile(r"^[A-Za-z0-9]+-(\d{1,3})-(\d{1,3})$")
-# Dropped from the container before verse extraction. `h4.psalm-title` matters most:
-# BibleGateway tags the psalm superscription with the verse-1 class, so keeping it
-# would prepend "A Psalm by David." to Psalms 23:1.
+# Dropped from the container before verse extraction. Every `h4` goes, not just
+# `h4.psalm-title`: headings carry the class of the verse they precede, so the parser
+# folds them into that verse. WEB/ASV use `h4.psalm-title` for superscriptions, NIV a
+# classless `h4`; ASV and NIV mark Psalm 119's stanzas with `h4.psalm-acrostic`
+# ("א Aleph."), WEB and NIV mark Song of Songs speakers with `h4.speaker`, sometimes
+# mid-verse. Listing only psalm-title left 22 ASV and at least 27 WEB verses stored
+# with those labels. `p.translation-note` is NIV's "[The earliest manuscripts…]" note,
+# tagged with the class of the verse after it (Mark 16:9, John 7:53).
 BIBLEGATEWAY_CONTAINER_REMOVABLE_SELECTOR = (
-    "div.footnotes, div.crossrefs, h4.psalm-title, p.psalm-title, h3, "
+    "div.footnotes, div.crossrefs, h4, p.psalm-title, h3, "
     "p.translation-note, a.full-chap-link, div.passage-other-trans"
 )
 # Dropped from each verse span. Kept separate from the container pass so a span can
@@ -1570,6 +1575,12 @@ class HolyBibleScraper:
             fragment = BeautifulSoup(str(node), "html.parser")
             for removable in fragment.select(BIBLEGATEWAY_INLINE_REMOVABLE_SELECTOR):
                 removable.decompose()
+            # NIV writes small caps as lowercase text plus CSS: the divine name is
+            # "Lord" and the cross inscription "the king of the jews" in the HTML, while
+            # print shows capitals. Uppercasing keeps LORD (YHWH) apart from Lord.
+            for small_caps in fragment.select("span.small-caps"):
+                for string in small_caps.find_all(string=True):
+                    string.replace_with(string.upper())
 
             # Keep source whitespace: an explicit separator would inject spaces
             # around inline markup such as removed footnote markers.
