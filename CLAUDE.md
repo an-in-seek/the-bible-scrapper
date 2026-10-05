@@ -48,6 +48,7 @@ python3 scripts/check_translation_drift.py --entry-url <URL> --head-only   # sou
 python3 scripts/check_translation_drift.py --translation-id <ID> --entry-url <URL>  # read-only diff
 python3 scrape_bible_to_db.py --test-genesis1              # parser-only check, no DB
 python3 scrape_bible_to_db.py --test-book 3 --test-chapter 11
+python3 scripts/check_translation_drift.py --translation-id <ID> --entry-url <URL> --output drift.jsonl  # every diff, uncapped
 python3 scrape_bible_to_db.py --start-book 1 --end-book 3  # actual load
 ```
 

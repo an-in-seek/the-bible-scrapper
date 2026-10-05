@@ -13,14 +13,21 @@ the source's design document.
 
     # cheap first pass: just ask the server when the page was last regenerated
     python3 scripts/check_translation_drift.py --entry-url https://... --head-only
+
+Each chapter's reads run in their own READ ONLY transaction that ends before the page
+is fetched. A run takes hours on a crawl-delayed source, and the DB sits behind
+Supabase's transaction-mode pooler: one transaction held for the whole run would pin a
+backend and hold locks that block any ALTER TABLE until it finished.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
+from typing import TextIO
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -51,6 +58,10 @@ def parse_args() -> argparse.Namespace:
         default=40,
         help="Stop printing individual differences after this many (default: 40)",
     )
+    parser.add_argument(
+        "--output",
+        help="Append every difference to this file as JSON lines (not capped by --max-report)",
+    )
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args()
 
@@ -69,9 +80,11 @@ def compare_book(
     book: Book,
     max_report: int,
     reported: int,
+    output: TextIO | None = None,
 ) -> tuple[int, int, int]:
     """Return (compared, drifted, reported) for one book."""
     chapter_map = repo.get_chapter_map(conn, book.id)
+    conn.rollback()
     if not chapter_map:
         logging.warning("[BOOK %02d] DB에 장이 없다. 건너뛴다", book.book_order)
         return 0, 0, reported
@@ -83,6 +96,8 @@ def compare_book(
     for chapter_number in sorted(chapter_map):
         chapter_id = chapter_map[chapter_number]
         stored = repo.get_verse_texts(conn, chapter_id)
+        # End the read before the page fetch, which sleeps for the crawl delay.
+        conn.rollback()
 
         payload = scraper.fetch_chapter_payload(
             book.book_order,
@@ -101,6 +116,18 @@ def compare_book(
             if before == after:
                 continue
             drifted += 1
+            if output is not None:
+                output.write(json.dumps(
+                    {
+                        "book": book.book_order,
+                        "chapter": chapter_number,
+                        "verse": number,
+                        "db": before,
+                        "source": after,
+                    },
+                    ensure_ascii=False,
+                ) + "\n")
+                output.flush()
             if reported >= max_report:
                 continue
             reported += 1
@@ -134,8 +161,16 @@ def main() -> int:
 
     repo = BibleRepository(translation_id=translation_id)
     conn = get_db_connection()
+    # Not autocommit: set_session(readonly=True, autocommit=True) sends a session-level
+    # SET that outlives this script on a pooled backend (see CLAUDE.md). Without it,
+    # psycopg2 opens each transaction READ ONLY and leaves the session default alone.
+    conn.set_session(readonly=True)
+    output = None
     try:
+        if args.output:
+            output = open(args.output, "a", encoding="utf-8")
         books = repo.fetch_books(conn, args.start_book, args.end_book)
+        conn.rollback()
         if not books:
             logging.error("translation_id=%s 에 해당 범위의 책이 없다", translation_id)
             return 2
@@ -145,7 +180,7 @@ def main() -> int:
         reported = 0
         for book in books:
             compared, drifted, reported = compare_book(
-                scraper, repo, conn, book, args.max_report, reported
+                scraper, repo, conn, book, args.max_report, reported, output
             )
             total_compared += compared
             total_drifted += drifted
@@ -162,6 +197,9 @@ def main() -> int:
             logging.warning("소스가 변경됐다. 재적재 절차는 해당 소스의 설계 문서를 따른다")
         return 1 if total_drifted else 0
     finally:
+        if output is not None:
+            output.close()
+        conn.rollback()
         conn.close()
 
 

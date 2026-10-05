@@ -227,8 +227,14 @@ python3 scripts/check_translation_drift.py --entry-url <URL> --head-only
 python3 scripts/check_translation_drift.py --translation-id <ID> --entry-url <URL>   --start-book 1 --end-book 1
 ```
 
+
+# 3) 차이를 빠짐없이 파일로 남기기 (화면 출력은 --max-report 건에서 잘림)
+python3 scripts/check_translation_drift.py --translation-id <ID> --entry-url <URL> --output drift.jsonl
 차이가 확인되면 해당 번역본의 `bible_verse`와 `bible_chapter`를 지우고 다시 적재해야 합니다.
 `bible_chapter`와 `bible_verse`에는 외래 키 제약이 없으므로 **반드시 절을 먼저 지웁니다.**
+DB 조회는 장마다 읽기 전용 트랜잭션으로 끝내고 페이지를 받습니다. 전권 대조는 몇 시간이 걸리는데,
+트랜잭션 하나를 그동안 열어 두면 트랜잭션 풀러의 백엔드를 붙잡고 `ALTER TABLE`을 막기 때문입니다.
+
 장을 먼저 지우면 절이 고아로 남아 책을 경유하는 쿼리로 찾을 수 없게 됩니다.
 전체 절차는 [docs/santa-biblia-libre-para-el-mundo-scraping-design.md](docs/santa-biblia-libre-para-el-mundo-scraping-design.md) 9.3절에 정리되어 있습니다.
 
