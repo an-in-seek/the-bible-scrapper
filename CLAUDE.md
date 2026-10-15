@@ -22,7 +22,7 @@ Supported sources:
 | `zh.wikisource.org` (`zh-hans`) | CUVS (圣经和合本 1919, Chinese simplified) | Implemented |
 | `studybible.info` (`Nestle`) | N1904 (Nestle 1904 Greek NT, New Testament only) | Implemented |
 | `ebible.org` (`fraLSG`) | LSG1910 (Louis Segond 1910, French, own verse numbering) | Implemented |
-| `biblegateway.com` (`version=NIV`) | NIV (New International Version 2011) — **copyrighted** | Parser and wiring only; **not loaded** |
+| `biblegateway.com` (`version=NIV`) | NIV (New International Version 2011) — **copyrighted** | Implemented; loaded 2026-10-05 at the user's direction (66 books / 31,103 verses). The DB is therefore not freely redistributable |
 
 Design documents:
 
@@ -37,7 +37,7 @@ Design documents:
 - [docs/chinese-union-version-1919-scraping-design.md](docs/chinese-union-version-1919-scraping-design.md) — CUVT/CUVS (和合本 1919)
 - [docs/greek-new-testament-nestle-1904-scraping-design.md](docs/greek-new-testament-nestle-1904-scraping-design.md) — N1904 (Nestle 1904 Greek NT), and why Rahlfs LXX 1935 is rejected
 - [docs/french-public-domain-scraping-design.md](docs/french-public-domain-scraping-design.md) — LSG1910 (Louis Segond 1910, French), and why Ostervald and Martin are on hold
-- [docs/new-international-version-scraping-design.md](docs/new-international-version-scraping-design.md) — NIV (copyrighted; parser and wiring done, **not loaded** — loading is a separate decision), plus the `h4` contamination found in the stored WEB/ASV text
+- [docs/new-international-version-scraping-design.md](docs/new-international-version-scraping-design.md) — NIV (copyrighted; rights notes, load results and the BibleGateway throttling seen mid-load), plus the `h4` contamination found in the stored WEB/ASV text
 
 ## Common commands
 

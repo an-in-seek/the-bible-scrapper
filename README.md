@@ -29,7 +29,7 @@
 - CUVT/CUVS: [docs/chinese-union-version-1919-scraping-design.md](docs/chinese-union-version-1919-scraping-design.md)
 - N1904: [docs/greek-new-testament-nestle-1904-scraping-design.md](docs/greek-new-testament-nestle-1904-scraping-design.md)
 - LSG1910(프랑스어; Ostervald · Martin은 보류): [docs/french-public-domain-scraping-design.md](docs/french-public-domain-scraping-design.md)
-- NIV(저작권 역본, 미적재): [docs/new-international-version-scraping-design.md](docs/new-international-version-scraping-design.md)
+- NIV(저작권 역본): [docs/new-international-version-scraping-design.md](docs/new-international-version-scraping-design.md)
 
 ## 주요 특징
 
@@ -64,7 +64,7 @@
 - `docs/chinese-union-version-1919-scraping-design.md`: CUVT/CUVS(중국어 和合本 1919) 설계 문서
 - `docs/greek-new-testament-nestle-1904-scraping-design.md`: N1904(그리스어 신약 Nestle 1904) 설계 문서. Rahlfs LXX 1935 불채택 근거 포함
 - `docs/french-public-domain-scraping-design.md`: LSG1910(프랑스어 Louis Segond 1910) 설계 문서. Ostervald·Martin 보류 근거 포함
-- `docs/new-international-version-scraping-design.md`: NIV 설계 문서 (저작권 역본. 파서·배선만 구현, 미적재). 기존 WEB·ASV의 `h4` 오염 발견 기록 포함
+- `docs/new-international-version-scraping-design.md`: NIV 설계 문서 (저작권 역본). 적재 결과와 기존 WEB·ASV의 `h4` 오염 발견 기록 포함
 
 ## 요구 사항
 
@@ -506,12 +506,15 @@ RVR1909·SBLM·JPNMEB와 같은 eBible 렌더러이며 역본 코드만 다릅�
 > Ostervald와 Martin은 보류했습니다. eBible의 Ostervald는 1744년판이 아니라 1996년 개정판이고,
 > studybible의 Martin은 다른 절 체계의 본문을 KJV 틀에 번호만 맞춰 넣어 92개 장이 어긋나 있습니다(설계 문서 10장).
 
-### 12. NIV `biblegateway.com` — 미적재
+### 12. NIV `biblegateway.com`
 
 New International Version(2011)은 **저작권 역본**입니다(Biblica). 이 저장소의 다른 역본은 모두 퍼블릭 도메인입니다.
 엔트리 URL 해석과 소스/역본 검증에 NIV가 등록되어 있고, 파서도 NIV 페이지를 처리합니다(`h4` 제거, small caps 대문자화).
-하지만 **전권 적재는 하지 않았습니다.** Biblica의 무허가 인용 한도(500절)와 BibleGateway 이용약관을 넘기 때문에
-별도 결정 사항으로 두었습니다. 근거와 실측 결과는 [설계 문서](docs/new-international-version-scraping-design.md)에 있습니다.
+전권 적재는 Biblica의 무허가 인용 한도(500절)와 BibleGateway 이용약관을 넘습니다. 사용자가 이를 확인한 뒤 적재를 지시했고,
+결과는 66권 / 1,189장 / **31,103절**입니다. KJV와 다른 좌표는 요삼 1:15 하나이고, 생략 절 16개는 `(omitted)`로 저장했습니다.
+적재 중 BibleGateway가 약 800번째 요청에서 일시적으로 요청을 제한해, 남은 장은 요청 간격을 30초로 늘려 받았습니다.
+근거와 실측 결과는 [설계 문서](docs/new-international-version-scraping-design.md) 2절과 15절에 있습니다.
+**이 DB에는 이제 저작권 역본이 들어 있으므로 자유롭게 배포할 수 없습니다.**
 
 ```env
 NIV_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=NIV
