@@ -279,6 +279,16 @@ class HolyBibleScraper:
     def close(self) -> None:
         self.session.close()
 
+    def raise_delay_floor(self, seconds: float) -> None:
+        """
+        Slow requests down past the source's own floor; never speed them up.
+
+        BibleGateway throttled the NIV load after ~800 requests at its declared 15s
+        crawl delay and not once at 30–33s, so a full load needs a longer gap.
+        """
+        self.sleep_min = max(self.sleep_min, seconds)
+        self.sleep_max = max(self.sleep_max, seconds + 3.0)
+
     def get_source_name(self) -> str:
         if self._is_thekingsbible_source():
             return "thekingsbible"

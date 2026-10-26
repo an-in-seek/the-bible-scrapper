@@ -597,6 +597,14 @@ NIV_TRANSLATION_METADATA = {
     "translation_type": "NIV",
 }
 
+# An English row the requirements table does not know.
+NASB_TRANSLATION_METADATA = {
+    "id": 13,
+    "language_code": "en",
+    "name": "New American Standard Bible",
+    "translation_type": "NASB",
+}
+
 
 def test_validate_source_translation_compatibility_for_biblegateway_niv() -> None:
     repo = FakeRepo()
@@ -609,13 +617,12 @@ def test_validate_source_translation_compatibility_for_biblegateway_niv() -> Non
 
 def test_validate_source_translation_compatibility_separates_niv_from_other_biblegateway_translations() -> None:
     """NIV must pass for none of the other BibleGateway rows, nor for an English row the
-    table does not know (ESV is in the DB with no source): before NIV had its own row,
+    table does not know (NASB is in the DB with no source): before NIV had its own row,
     `version=NIV` had no expected translation and that last pair passed."""
-    esv_metadata = {"id": 12, "language_code": "en", "name": "English Standard Version", "translation_type": "ESV"}
     pairs = [
         (BIBLEGATEWAY_NIV_ENTRY_URL, WEB_TRANSLATION_METADATA),
         (BIBLEGATEWAY_NIV_ENTRY_URL, ASV_TRANSLATION_METADATA),
-        (BIBLEGATEWAY_NIV_ENTRY_URL, esv_metadata),
+        (BIBLEGATEWAY_NIV_ENTRY_URL, NASB_TRANSLATION_METADATA),
         (BIBLEGATEWAY_WEB_ENTRY_URL, NIV_TRANSLATION_METADATA),
         (BIBLEGATEWAY_ASV_ENTRY_URL, NIV_TRANSLATION_METADATA),
         # NIVUK is a different edition on the same site.
@@ -670,6 +677,88 @@ def test_resolve_default_entry_url_rejects_english_ambiguity_with_niv() -> None:
         {
             "ASV_ENTRY_URL": BIBLEGATEWAY_ASV_ENTRY_URL,
             "NIV_ENTRY_URL": BIBLEGATEWAY_NIV_ENTRY_URL,
+            "BIBLE_LANGUAGE_CODE": "en",
+        }
+    ):
+        try:
+            resolve_default_entry_url()
+        except ValueError as exc:
+            assert "Ambiguous entry URL" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")
+
+
+BIBLEGATEWAY_ESV_ENTRY_URL = "https://www.biblegateway.com/passage/?search=Genesis%201&version=ESV"
+
+ESV_TRANSLATION_METADATA = {
+    "id": 12,
+    "language_code": "en",
+    "name": "English Standard Version",
+    "translation_type": "ESV",
+}
+
+
+def test_validate_source_translation_compatibility_for_biblegateway_esv() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(ESV_TRANSLATION_METADATA)
+    scraper = BibleGatewayScraper(BIBLEGATEWAY_ESV_ENTRY_URL)
+
+    validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+
+
+def test_validate_source_translation_compatibility_recognises_esv_by_identity() -> None:
+    # translation_type empty: the row is recognised from (name, language_code).
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = {**ESV_TRANSLATION_METADATA, "translation_type": None}
+    scraper = BibleGatewayScraper(BIBLEGATEWAY_ESV_ENTRY_URL)
+
+    validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+
+
+def test_validate_source_translation_compatibility_separates_esv_from_other_biblegateway_translations() -> None:
+    pairs = [
+        (BIBLEGATEWAY_ESV_ENTRY_URL, WEB_TRANSLATION_METADATA),
+        (BIBLEGATEWAY_ESV_ENTRY_URL, ASV_TRANSLATION_METADATA),
+        (BIBLEGATEWAY_ESV_ENTRY_URL, NIV_TRANSLATION_METADATA),
+        (BIBLEGATEWAY_ESV_ENTRY_URL, NASB_TRANSLATION_METADATA),
+        (BIBLEGATEWAY_WEB_ENTRY_URL, ESV_TRANSLATION_METADATA),
+        (BIBLEGATEWAY_ASV_ENTRY_URL, ESV_TRANSLATION_METADATA),
+        (BIBLEGATEWAY_NIV_ENTRY_URL, ESV_TRANSLATION_METADATA),
+        # ESVUK is a different edition on the same site.
+        ("https://www.biblegateway.com/passage/?search=Genesis%201&version=ESVUK", ESV_TRANSLATION_METADATA),
+    ]
+    for entry_url, metadata in pairs:
+        repo = FakeRepo()
+        conn = FakeConn()
+        conn.translation_metadata = dict(metadata)
+        scraper = BibleGatewayScraper(entry_url)
+        try:
+            validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+        except RuntimeError as exc:
+            assert "Source/translation mismatch" in str(exc)
+        else:
+            raise AssertionError(f"expected RuntimeError for {entry_url} + {metadata['translation_type']}")
+
+
+def test_resolve_default_entry_url_prefers_esv_when_translation_type_is_esv() -> None:
+    with _with_entry_url_env(
+        {
+            "KJV_ENTRY_URL": "https://thekingsbible.com/Bible/1/1",
+            "NIV_ENTRY_URL": BIBLEGATEWAY_NIV_ENTRY_URL,
+            "ESV_ENTRY_URL": BIBLEGATEWAY_ESV_ENTRY_URL,
+            "BIBLE_TRANSLATION_TYPE": "ESV",
+        }
+    ):
+        assert resolve_default_entry_url() == BIBLEGATEWAY_ESV_ENTRY_URL
+
+
+def test_resolve_default_entry_url_rejects_english_ambiguity_with_esv() -> None:
+    with _with_entry_url_env(
+        {
+            "NIV_ENTRY_URL": BIBLEGATEWAY_NIV_ENTRY_URL,
+            "ESV_ENTRY_URL": BIBLEGATEWAY_ESV_ENTRY_URL,
             "BIBLE_LANGUAGE_CODE": "en",
         }
     ):

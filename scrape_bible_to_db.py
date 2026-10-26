@@ -29,11 +29,12 @@ ENTRY_URL_ENV_BY_TRANSLATION_TYPE = {
     "N1904": "N1904_ENTRY_URL",
     "LSG1910": "LSG1910_ENTRY_URL",
     "NIV": "NIV_ENTRY_URL",
+    "ESV": "ESV_ENTRY_URL",
 }
-# A language code alone does not identify a source: 'en' covers KJV, WEB, ASV and NIV.
+# A language code alone does not identify a source: 'en' covers KJV, WEB, ASV, NIV and ESV.
 TRANSLATION_TYPES_BY_LANGUAGE_CODE = {
     "ko": ("NKRV",),
-    "en": ("KJV", "WEB", "ASV", "NIV"),
+    "en": ("KJV", "WEB", "ASV", "NIV", "ESV"),
     "es": ("RVR1909", "SBLM"),
     "ja": ("JPNMEB", "KOUGO"),
     "zh": ("CUVT", "CUVS"),
@@ -46,7 +47,7 @@ LEGACY_TRANSLATION_TYPE_BY_ID = {"2": "NKRV"}
 # Tie-break when nothing else narrows it down; keeps the pre-WEB default.
 ENTRY_URL_PREFERENCE_ORDER = (
     "NKRV", "KJV", "WEB", "ASV", "RVR1909", "SBLM", "JPNMEB", "KOUGO", "CUVT", "CUVS",
-    "N1904", "LSG1910", "NIV",
+    "N1904", "LSG1910", "NIV", "ESV",
 )
 # Which source may legitimately produce each translation, and how to recognise the
 # translation when bible_translation.translation_type is empty. Drives the
@@ -143,6 +144,14 @@ TRANSLATION_SOURCE_REQUIREMENTS = {
         "source": "biblegateway",
         "version": "NIV",
         "name": "New International Version",
+        "language_code": "en",
+    },
+    "ESV": {
+        # Copyrighted too (Crossway). The site also serves ESVUK, a separate edition;
+        # the exact version match keeps it out of this row.
+        "source": "biblegateway",
+        "version": "ESV",
+        "name": "English Standard Version",
         "language_code": "en",
     },
 }
@@ -280,6 +289,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=3,
         help="Retry count per book on failure",
+    )
+    parser.add_argument(
+        "--min-delay",
+        type=float,
+        default=None,
+        help="Raise the per-request delay to at least this many seconds (never lowers a source's floor)",
     )
     parser.add_argument(
         "--test-genesis1",
@@ -652,6 +667,8 @@ def run() -> int:
         return 2
 
     scraper = HolyBibleScraper(entry_url=entry_url)
+    if args.min_delay is not None:
+        scraper.raise_delay_floor(args.min_delay)
 
     # Smoke test path should not require DB connection.
     if args.test_genesis1 or args.test_book is not None:

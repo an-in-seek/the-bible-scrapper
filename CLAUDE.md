@@ -23,6 +23,7 @@ Supported sources:
 | `studybible.info` (`Nestle`) | N1904 (Nestle 1904 Greek NT, New Testament only) | Implemented |
 | `ebible.org` (`fraLSG`) | LSG1910 (Louis Segond 1910, French, own verse numbering) | Implemented |
 | `biblegateway.com` (`version=NIV`) | NIV (New International Version 2011) — **copyrighted** | Implemented; loaded 2026-10-05 at the user's direction (66 books / 31,103 verses). The DB is therefore not freely redistributable |
+| `biblegateway.com` (`version=ESV`) | ESV (English Standard Version, Text Edition 2025) — **copyrighted** | Wired and sampled; **not loaded**. Loading is the user's call (design doc §2) |
 
 Design documents:
 
@@ -38,6 +39,7 @@ Design documents:
 - [docs/greek-new-testament-nestle-1904-scraping-design.md](docs/greek-new-testament-nestle-1904-scraping-design.md) — N1904 (Nestle 1904 Greek NT), and why Rahlfs LXX 1935 is rejected
 - [docs/french-public-domain-scraping-design.md](docs/french-public-domain-scraping-design.md) — LSG1910 (Louis Segond 1910, French), and why Ostervald and Martin are on hold
 - [docs/new-international-version-scraping-design.md](docs/new-international-version-scraping-design.md) — NIV (copyrighted; rights notes, load results and the BibleGateway throttling seen mid-load), plus the `h4` contamination found in the stored WEB/ASV text
+- [docs/english-standard-version-scraping-design.md](docs/english-standard-version-scraping-design.md) — ESV (copyrighted; Crossway's terms, sample measurements, load plan)
 
 ## Common commands
 
@@ -52,6 +54,7 @@ python3 scripts/check_translation_drift.py --translation-id <ID> --entry-url <UR
 python3 scrape_bible_to_db.py --test-genesis1              # parser-only check, no DB
 python3 scrape_bible_to_db.py --test-book 3 --test-chapter 11
 python3 scrape_bible_to_db.py --start-book 1 --end-book 3  # actual load
+python3 scrape_bible_to_db.py --min-delay 30 --start-book 1 --end-book 66  # full BibleGateway load, slower than the floor
 ```
 
 Use `python` on Windows and `python3` on WSL/Linux. Changes must work on both.
@@ -122,7 +125,7 @@ bskorea → biblegateway → ebible → jpnbible → wikisource → studybible �
 - **LSG1910 keeps the edition's own verse numbering**, which differs from KJV in 106 chapters: 62 Psalms whose title is verse 1 (51, 52, 54, 60 have a two-verse title) and 44 chapters in 20 books where the chapter boundary or verse division moves (Exodus 7–8, Job 38–41, Jonah 1–2, Mark 9–10 …). Every other translation here is effectively KJV-versified, so parallel display by `(book, chapter, verse)` misaligns there. Verify against the fixed chapter list in the design doc, not against KJV counts. A long LSG psalm title is a **numbered verse inside `div.q`**, unlike the unnumbered `div.d` superscription the other translations drop — removing it makes those chapters start at verse 2, and the loader then skips all 62.
 - fraLSG opens each book with a modern introduction (`div.ip`, `div.io`, `table`, …) **before** the first verse marker. The accumulator collects nothing before a marker, so it is dropped without a selector; keep it that way rather than listing the classes.
 - `_extract_verses_from_studybible_page()` is the **only parser that normalises Unicode**. 27% of Nestle 1904 as this source serves it is not NFC — U+0387 GREEK ANO TELEIA 2,359 times plus 21 deprecated *oxia* letters — and one of the oxia letters is in `Βίβλος`, the first word of Matthew 1:1. Stored raw, that verse does not match a normally typed search term while every automated check still passes. Normalising here rather than globally keeps the other ten translations (342,078 rows, all already NFC) off an unverified path, and keeps `check_translation_drift.py` correct because it re-parses through this same adapter.
-- **N1904 has verse-number gaps and no `(omitted)` markers, on purpose.** The source prints nothing where a critical text omits a verse, so there is no page evidence to justify a marker; filling the 15 gaps from a hardcoded list would put data in the DB the source never gave and would make a real parser failure indistinguishable from an edition difference. ASV is already stored the same way (16 gaps). Verify against the fixed KJV-diff list (17 missing, 2 extra), not against contiguity — and note Acts 19:41 and 2 Cor 13:14 leave **no** gap because the merge is at the chapter end.
+- **N1904 has verse-number gaps and no `(omitted)` markers, on purpose.** The source prints nothing where a critical text omits a verse, so there is no page evidence to justify a marker; filling the 15 gaps from a hardcoded list would put data in the DB the source never gave and would make a real parser failure indistinguishable from an edition difference. ASV is already stored the same way (16 gaps), and ESV would be too: in a 35-chapter sample it drops the same 16 verses as NIV but, unlike NIV and WEB, leaves no span for them (Romans 16:24 survives only as a footnote on 16:23). Verify against the fixed KJV-diff list (17 missing, 2 extra), not against contiguity — and note Acts 19:41 and 2 Cor 13:14 leave **no** gap because the merge is at the chapter end.
 - `_build_studybible_url()` refuses `book_order < 40`. Nestle 1904 is New Testament only, and an Old Testament or past-the-end chapter answers **200 with an empty passage box**, not 404 — the generic chain then reads that page as two plausible verses starting at 1 (`John 1:1`, `Peter 3:5`), which walks straight past the "first verse must be 1" guard. That is also why `bible_book` holds 27 rows for this translation, not 66, and why chapter counts come from `KJV_CHAPTER_COUNTS` rather than probing.
 - The studybible container holds **no block elements** (measured across all 260 chapters: only `sup` and `a`), so unlike the eBible parser it inserts no block-boundary space. Verse numbers come from the marker's `title`, which also carries the chapter — the displayed number agrees in all 7,942 places, so the `title` is read for the chapter half, which is what makes the mixed-chapter guard possible.
 
@@ -149,7 +152,7 @@ Skipping step 7 lets, for example, WEB text land under the KJV translation — e
 - `.env` is loaded with `os.environ.setdefault()`, so **shell environment variables win**.
 - Translation resolution order: `BIBLE_TRANSLATION_ID` → lookup by (`BIBLE_TRANSLATION_TYPE`, `BIBLE_TRANSLATION_NAME`, `BIBLE_LANGUAGE_CODE`) → legacy default `translation_id=10`.
 - That **legacy fallback of 10 is a trap**: with no variables set, data is silently written to translation 10.
-- Entry URL comes from `KJV_ENTRY_URL` / `NKRV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` / `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` / `JPNMEB_ENTRY_URL` / `KOUGO_ENTRY_URL` / `CUVT_ENTRY_URL` / `CUVS_ENTRY_URL` / `N1904_ENTRY_URL` / `LSG1910_ENTRY_URL` / `NIV_ENTRY_URL`. A language code no longer identifies a source on its own: `en` covers KJV/WEB/ASV/NIV, `es` covers RVR1909/SBLM, `ja` covers JPNMEB/KOUGO and `zh` covers CUVT/CUVS, so with more than one URL of that language set, resolution raises rather than guessing. `el` currently maps to N1904 alone. The text is Koine, not Modern Greek, but the DB registered it as `el` and its `language_code` CHECK admits `el`, not `grc` — so `BIBLE_LANGUAGE_CODE=grc` finds no translation. A Modern Greek translation added later would share `el` with N1904. `fr` maps to LSG1910 alone. `BIBLE_TRANSLATION_ID` does **not** steer entry-URL selection, so an ID-only run can silently pick the wrong source; pass `BIBLE_TRANSLATION_TYPE` or `--entry-url`.
+- Entry URL comes from `KJV_ENTRY_URL` / `NKRV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` / `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` / `JPNMEB_ENTRY_URL` / `KOUGO_ENTRY_URL` / `CUVT_ENTRY_URL` / `CUVS_ENTRY_URL` / `N1904_ENTRY_URL` / `LSG1910_ENTRY_URL` / `NIV_ENTRY_URL` / `ESV_ENTRY_URL`. A language code no longer identifies a source on its own: `en` covers KJV/WEB/ASV/NIV/ESV, `es` covers RVR1909/SBLM, `ja` covers JPNMEB/KOUGO and `zh` covers CUVT/CUVS, so with more than one URL of that language set, resolution raises rather than guessing. `el` currently maps to N1904 alone. The text is Koine, not Modern Greek, but the DB registered it as `el` and its `language_code` CHECK admits `el`, not `grc` — so `BIBLE_LANGUAGE_CODE=grc` finds no translation. A Modern Greek translation added later would share `el` with N1904. `fr` maps to LSG1910 alone. `BIBLE_TRANSLATION_ID` does **not** steer entry-URL selection, so an ID-only run can silently pick the wrong source; pass `BIBLE_TRANSLATION_TYPE` or `--entry-url`.
 - Never hardcode DB credentials (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`).
 
 ### CLI argument constraints
@@ -176,4 +179,5 @@ Skipping step 7 lets, for example, WEB text land under the KJV translation — e
 
 - Keep the polite per-request delay and the 5-second gap between books. Do not bypass the 429/5xx retry and throttle-multiplier logic.
 - BibleGateway declares `Crawl-delay: 15`, enforced as a floor in `HolyBibleScraper.__init__` (`BIBLEGATEWAY_CRAWL_DELAY_SECONDS`). **Do not lower it** — a full 66-book load is meant to take ~5 hours.
+- That floor is not enough for a whole translation: the NIV load was throttled around request 800 at 15–18s and saw no throttling at 30–33s. `--min-delay` (`HolyBibleScraper.raise_delay_floor()`) only ever raises the gap; use `--min-delay 30` for a full BibleGateway load (~10–11 hours).
 - Check the target site's `robots.txt` and terms of use before adding a new source.

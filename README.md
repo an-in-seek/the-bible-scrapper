@@ -30,6 +30,7 @@
 - N1904: [docs/greek-new-testament-nestle-1904-scraping-design.md](docs/greek-new-testament-nestle-1904-scraping-design.md)
 - LSG1910(프랑스어; Ostervald · Martin은 보류): [docs/french-public-domain-scraping-design.md](docs/french-public-domain-scraping-design.md)
 - NIV(저작권 역본): [docs/new-international-version-scraping-design.md](docs/new-international-version-scraping-design.md)
+- ESV(저작권 역본): [docs/english-standard-version-scraping-design.md](docs/english-standard-version-scraping-design.md)
 
 ## 주요 특징
 
@@ -65,6 +66,7 @@
 - `docs/greek-new-testament-nestle-1904-scraping-design.md`: N1904(그리스어 신약 Nestle 1904) 설계 문서. Rahlfs LXX 1935 불채택 근거 포함
 - `docs/french-public-domain-scraping-design.md`: LSG1910(프랑스어 Louis Segond 1910) 설계 문서. Ostervald·Martin 보류 근거 포함
 - `docs/new-international-version-scraping-design.md`: NIV 설계 문서 (저작권 역본). 적재 결과와 기존 WEB·ASV의 `h4` 오염 발견 기록 포함
+- `docs/english-standard-version-scraping-design.md`: ESV 설계 문서 (저작권 역본). 실측 결과와 권리 사항 포함
 
 ## 요구 사항
 
@@ -123,22 +125,22 @@ CUVS_ENTRY_URL=https://zh.wikisource.org/zh-hans/%E8%81%96%E7%B6%93_(%E5%92%8C%E
 
 `--entry-url`를 지정하지 않으면 기본 URL은 아래 순서로 결정됩니다.
 
-1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JPNMEB` / `KOUGO` / `CUVT` / `CUVS` / `N1904` / `LSG1910` / `NIV`)에 해당하는 환경변수
+1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JPNMEB` / `KOUGO` / `CUVT` / `CUVS` / `N1904` / `LSG1910` / `NIV` / `ESV`)에 해당하는 환경변수
 2. `BIBLE_TRANSLATION_ID=2` 또는 `BIBLE_TRANSLATION_NAME=개역개정`이면 `NKRV_ENTRY_URL`
 3. `BIBLE_LANGUAGE_CODE`로 좁혀지는 소스가 하나면 그 값
    - `ko` -> `NKRV_ENTRY_URL`
-   - `en` -> `KJV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` / `NIV_ENTRY_URL` 중 설정된 것
+   - `en` -> `KJV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` / `NIV_ENTRY_URL` / `ESV_ENTRY_URL` 중 설정된 것
    - `es` -> `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` 중 설정된 것
    - `ja` -> `JPNMEB_ENTRY_URL` / `KOUGO_ENTRY_URL` 중 설정된 것
    - `zh` -> `CUVT_ENTRY_URL` / `CUVS_ENTRY_URL` 중 설정된 것
    - `el` -> `N1904_ENTRY_URL` (본문은 코이네 그리스어지만 DB의 `language_code` CHECK가 `grc`가 아닌 `el`을 허용하므로 `el`로 등록되어 있습니다)
    - `fr` -> `LSG1910_ENTRY_URL`
 4. 설정된 엔트리 URL이 하나뿐이면 그 값
-5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JPNMEB` -> `KOUGO` -> `CUVT` -> `CUVS` -> `N1904` -> `LSG1910` -> `NIV` 순으로 선택
+5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JPNMEB` -> `KOUGO` -> `CUVT` -> `CUVS` -> `N1904` -> `LSG1910` -> `NIV` -> `ESV` 순으로 선택
 6. 아무것도 없으면 내장 기본값 `https://thekingsbible.com/Bible/1/1` 사용
 
 주의: `BIBLE_LANGUAGE_CODE`만으로는 소스가 특정되지 않습니다.  
-`en`(KJV / WEB / ASV / NIV), `es`(RVR1909 / SBLM), `ja`(JPNMEB / KOUGO), `zh`(CUVT / CUVS) 모두 소스가 둘 이상이라,  
+`en`(KJV / WEB / ASV / NIV / ESV), `es`(RVR1909 / SBLM), `ja`(JPNMEB / KOUGO), `zh`(CUVT / CUVS) 모두 소스가 둘 이상이라,  
 해당 엔트리 URL이 여러 개 설정된 상태에서 언어 코드만 주면 실행이 중단됩니다.  
 이때는 `BIBLE_TRANSLATION_TYPE`을 지정하거나 `--entry-url`을 명시해야 합니다.
 
@@ -520,9 +522,24 @@ New International Version(2011)은 **저작권 역본**입니다(Biblica). 이 �
 NIV_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=NIV
 ```
 
+### 13. ESV `biblegateway.com`
+
+English Standard Version(ESV Text Edition: 2025)도 **저작권 역본**입니다(Crossway).
+엔트리 URL 해석과 소스/역본 검증에 ESV가 등록되어 있습니다. 파서는 바꾸지 않았습니다. NIV 때 넣은 `h4` 제거와 small caps 대문자화가 ESV 페이지를 그대로 처리합니다.
+
+- ESV가 본문에서 빼는 16절(35개 장 표본 기준, NIV와 같은 좌표)은 ASV처럼 스팬 자체가 없어 `(omitted)`가 아니라 **절 번호 구멍**으로 남습니다. 예상 총 절 수는 **31,087절**(KJV 31,102 − 16 + 요삼 1:15)입니다.
+- Crossway의 무허가 인용 한도는 500절(한 권의 절반 이하, 저작물의 25% 미만)이고, BibleGateway 이용약관은 콘텐츠의 복사·보관을 금지합니다.
+- **아직 적재하지 않았습니다.** `bible_book` 66행(12번 역본)도 아직 없습니다. 적재 여부는 [설계 문서](docs/english-standard-version-scraping-design.md) 2절을 보고 따로 결정합니다.
+- 적재한다면 `--min-delay 30`으로 돌립니다(약 10~11시간). 실행 예는 설계 문서 10절에 있습니다.
+
+```env
+ESV_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=ESV
+```
+
 ## 네트워크와 재시도
 
-- `429`, `502`, `503`, `504` 응답은 자동 재시도합니다.
+- `429`, `502`, `503`, `504` 응답은 자동 재시도합니다. 그 밖의 HTTP 오류와 연결 오류(`requests.RequestException`)도 같은 재시도(최대 7회 시도)에 걸립니다.
+  ESV 샘플 수집 중 BibleGateway가 시 51편에 일시적으로 `500`을 돌려준 적이 있고, 다시 요청하자 정상이었습니다.
 - `429` 응답에 `Retry-After`가 있으면 해당 값을 우선 사용합니다.
 - 본문에 `Too Many Requests`, `429 Error` 같은 마커가 있는 200 응답도 재시도 대상으로 처리합니다.
 - 요청 성공 후에는 throttle을 서서히 낮추고, 실패가 누적되면 요청 간 대기 시간을 늘립니다.
@@ -531,6 +548,8 @@ NIV_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=N
 - BibleGateway는 `robots.txt`에 `Crawl-delay: 15`를 명시하므로, 이 소스에서는 요청 간격 하한이 15초로 강제됩니다.
   - 생성자에 더 짧은 값을 넘겨도 15초 미만으로 내려가지 않습니다.
   - 66권 전권 적재는 1,189 요청이며 약 5시간이 걸립니다.
+  - 다만 NIV 적재 때 15~18초 간격으로 약 800번째 요청에서 일시 제한을 받았고, 30~33초 간격에서는 남은 426장 동안 제한이 없었습니다.
+    전권을 받을 때는 `--min-delay 30`을 주는 편이 안전합니다(약 10~11시간).
 
 ## 실행 방법
 
@@ -586,6 +605,7 @@ python3 scrape_bible_to_db.py --book-retries 5 --verbose
 ```
 
 - `--book-retries`: 책 단위 실패 재시도 횟수, 기본값 `3`
+- `--min-delay`: 요청 간격의 하한(초)을 올립니다. 소스의 하한보다 낮은 값은 무시되므로 간격을 줄이는 데는 쓸 수 없습니다
 - `--verbose`: `DEBUG` 로그 활성화
 
 ## 실행 예시

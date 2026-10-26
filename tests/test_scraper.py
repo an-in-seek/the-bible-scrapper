@@ -358,6 +358,24 @@ def test_biblegateway_source_enforces_crawl_delay_floor() -> None:
     assert scraper.sleep_max >= 15.0
 
 
+def test_raise_delay_floor_slows_biblegateway_down() -> None:
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
+
+    scraper.raise_delay_floor(30.0)
+
+    assert scraper.sleep_min == 30.0
+    assert scraper.sleep_max == 33.0
+
+
+def test_raise_delay_floor_never_lowers_a_source_floor() -> None:
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_ENTRY_URL)
+
+    scraper.raise_delay_floor(1.0)
+
+    assert scraper.sleep_min >= 15.0
+    assert scraper.sleep_max >= 18.0
+
+
 def test_other_sources_keep_default_sleep_settings() -> None:
     scraper = HolyBibleScraper(entry_url="https://thekingsbible.com/Bible/1/1")
 
