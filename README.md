@@ -527,10 +527,12 @@ NIV_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=N
 English Standard Version(ESV Text Edition: 2025)도 **저작권 역본**입니다(Crossway).
 엔트리 URL 해석과 소스/역본 검증에 ESV가 등록되어 있습니다. 파서는 바꾸지 않았습니다. NIV 때 넣은 `h4` 제거와 small caps 대문자화가 ESV 페이지를 그대로 처리합니다.
 
-- ESV가 본문에서 빼는 16절(35개 장 표본 기준, NIV와 같은 좌표)은 ASV처럼 스팬 자체가 없어 `(omitted)`가 아니라 **절 번호 구멍**으로 남습니다. 예상 총 절 수는 **31,087절**(KJV 31,102 − 16 + 요삼 1:15)입니다.
+- ESV가 본문에서 빼는 17절은 ASV처럼 스팬 자체가 없어 `(omitted)`가 아니라 **절 번호 구멍**으로 남습니다. NIV와 같은 좌표 16개에 마 12:47이 더해집니다(NIV는 이 절을 본문에 둡니다).
 - Crossway의 무허가 인용 한도는 500절(한 권의 절반 이하, 저작물의 25% 미만)이고, BibleGateway 이용약관은 콘텐츠의 복사·보관을 금지합니다.
-- **아직 적재하지 않았습니다.** `bible_book` 66행(12번 역본)도 아직 없습니다. 적재 여부는 [설계 문서](docs/english-standard-version-scraping-design.md) 2절을 보고 따로 결정합니다.
-- 적재한다면 `--min-delay 30`으로 돌립니다(약 10~11시간). 실행 예는 설계 문서 10절에 있습니다.
+- 사용자가 권리 사항을 전달받은 뒤 적재를 지시했고, 결과는 66권 / 1,189장 / **31,086절**입니다(2026-10-29).
+  KJV에 없는 좌표는 요삼 1:15 하나, 구멍 17개는 정해 둔 목록과 정확히 같고, 저장한 표본 36개 장은 DB와 모두 일치합니다.
+- 30초 간격으로 약 1,000회 요청한 뒤(막 11장), 45초 간격으로 약 200회 더 요청한 뒤(계 1장) 두 번 일시 제한을 받았습니다. 마지막 22장은 이틀 뒤 60초 간격으로 받았습니다.
+- 근거와 실측 결과는 [설계 문서](docs/english-standard-version-scraping-design.md) 2절과 14절에 있습니다. **NIV와 마찬가지로 이 DB는 자유롭게 배포할 수 없습니다.**
 
 ```env
 ESV_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=ESV
@@ -550,6 +552,7 @@ ESV_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=E
   - 66권 전권 적재는 1,189 요청이며 약 5시간이 걸립니다.
   - 다만 NIV 적재 때 15~18초 간격으로 약 800번째 요청에서 일시 제한을 받았고, 30~33초 간격에서는 남은 426장 동안 제한이 없었습니다.
     전권을 받을 때는 `--min-delay 30`을 주는 편이 안전합니다(약 10~11시간).
+  - 그래도 ESV 적재 때는 30초 간격으로 약 1,000회 요청한 뒤 제한을 받았습니다. 제한은 누적 요청 수에 걸리는 것으로 보이므로, 전권은 하루 1,000회 미만으로 나눠 받는 편이 안전합니다.
 
 ## 실행 방법
 
