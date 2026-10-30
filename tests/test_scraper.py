@@ -437,6 +437,29 @@ def test_parse_verses_from_bskorea_keeps_placeholder_span_printed_by_gae() -> No
     assert _bskorea_verses(html) == {1: "첫째 절이다.", 2: BSKOREA_OMITTED_VERSE_TEXT, 3: "셋째 절이다."}
 
 
+def test_parse_verses_from_bskorea_keeps_full_width_placeholder_span() -> None:
+    # NKRV holds Acts 24:7 as "（없음）" (full-width parentheses): source text too, not an
+    # omission marker the parser fails to understand.
+    html = _bskorea_page(
+        f"{_number('1')}첫째 절이다.",
+        f"{_number('2')}（없음）",
+        f"{_number('3')}셋째 절이다.",
+    )
+
+    assert _bskorea_verses(html) == {1: "첫째 절이다.", 2: "（없음）", 3: "셋째 절이다."}
+
+
+def test_parse_verses_from_bskorea_survives_styled_node_inside_hidden_node() -> None:
+    # The styled child is destroyed with its hidden parent before the loop reaches it.
+    html = (
+        '<div id="tdBible1" class="bible_read">'
+        '<div style="display:none"><span style="color:#376BCB">숨김 글이다</span></div>'
+        f"<span>{_number('1')}첫째 절이다.</span></div>"
+    )
+
+    assert _bskorea_verses(html) == {1: "첫째 절이다."}
+
+
 def test_parse_verses_from_bskorea_stores_merged_range_at_every_number() -> None:
     html = _bskorea_page(
         f"{_number('1')}첫째 절이다.",
@@ -463,6 +486,10 @@ def test_parse_verses_from_bskorea_stores_merged_range_at_every_number() -> None
         (f"{_number('1')}첫째 절이다. (2절 없음)", f"{_number('2')}둘째 절이다."),
         # A verse number that is neither N nor N-M.
         (f"{_number('1')}첫째 절이다.", f"{_number('2a')}둘째 절이다."),
+        # A range that runs backwards (it would otherwise add nothing and pass).
+        (f"{_number('1')}첫째 절이다.", f"{_number('2')}둘째 절이다.", f"{_number('3-2')}셋째 절이다."),
+        # A range past MAX_VERSE_NUMBER.
+        (f"{_number('1')}첫째 절이다.", f"{_number('2-250')}둘째 절이다."),
     ],
 )
 def test_parse_verses_from_bskorea_refuses_a_chapter_that_does_not_add_up(spans: tuple[str, ...]) -> None:
@@ -497,6 +524,19 @@ def test_fetch_chapter_payload_strips_song_of_songs_speaker_labels() -> None:
     assert payload_for(22) == {1: "첫째 노래이다.", 2: "둘째 노래이다. 셋째 말이다."}
     # Only Song of Songs: the same strings elsewhere are left alone.
     assert payload_for(1) == {1: "첫째 노래이다. (여자)", 2: "둘째 노래이다. (남자) 셋째 말이다. (친구들)"}
+
+
+def test_fetch_chapter_payload_skips_song_chapter_with_label_only_verse() -> None:
+    # Stripped to nothing, verse 2 would be dropped after the parser's gap check.
+    html = _bskorea_page(
+        f"{_number('1')}첫째 노래이다.",
+        f"{_number('2')}(친구들)",
+        f"{_number('3')}셋째 노래이다.",
+    )
+    scraper = HolyBibleScraper(entry_url=BSKOREA_SAENEW_ENTRY_URL)
+    scraper._fetch_soup = lambda url: BeautifulSoup(html, "html.parser")
+
+    assert scraper.fetch_chapter_payload(22, 1, chapter_url=BSKOREA_SAENEW_ENTRY_URL).verses == []
 
 
 BIBLEGATEWAY_ENTRY_URL = "https://www.biblegateway.com/passage/?search=Genesis%201&version=WEB"

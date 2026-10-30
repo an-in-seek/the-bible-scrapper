@@ -784,10 +784,14 @@ class HolyBibleScraper:
         return f"{DEFAULT_THEKINGSBIBLE_KJV_BASE_URL}/{book_order}/{chapter_number}"
 
     @staticmethod
+    def _to_bskorea_book_code(code: str) -> str:
+        """USFM code to the one bskorea uses; only Jonah differs ("jon" -> "jnh")."""
+        return BSKOREA_BOOK_CODE_OVERRIDES.get(code, code)
+
+    @staticmethod
     def _get_bskorea_book_code(book_order: int) -> str | None:
         if 1 <= book_order <= len(USFM_BOOK_CODES):
-            code = USFM_BOOK_CODES[book_order - 1]
-            return BSKOREA_BOOK_CODE_OVERRIDES.get(code, code)
+            return HolyBibleScraper._to_bskorea_book_code(USFM_BOOK_CODES[book_order - 1])
         return None
 
     def _get_bskorea_version(self) -> str:
@@ -810,7 +814,7 @@ class HolyBibleScraper:
         book_code = (book_code or self._get_bskorea_book_code(book_order))
         if book_code is None:
             raise ValueError(f"Invalid bskorea book order: {book_order}")
-        book_code = BSKOREA_BOOK_CODE_OVERRIDES.get(book_code, book_code)
+        book_code = self._to_bskorea_book_code(book_code)
 
         parsed = urlparse(self.entry_url or DEFAULT_BSKOREA_NKRV_ENTRY_URL)
         path = parsed.path or "/bible/korbibReadpage.php"
@@ -1222,13 +1226,7 @@ class HolyBibleScraper:
         # Done here rather than in the parser, which never learns the book. The loader,
         # the smoke test and the drift check all come through this method.
         if self._is_bskorea_source() and book_order == SONG_OF_SONGS_BOOK_ORDER:
-            verses = [
-                Verse(
-                    verse_number=verse.verse_number,
-                    text=BSKOREA_SONG_SPEAKER_LABEL_PATTERN.sub(" ", verse.text),
-                )
-                for verse in verses
-            ]
+            verses = self._strip_bskorea_song_speaker_labels(verses)
         verses = self._sanitize_verses(verses)
 
         payload = ChapterPayload(
@@ -1564,6 +1562,24 @@ class HolyBibleScraper:
             return candidates[0]
         return None
 
+    def _strip_bskorea_song_speaker_labels(self, verses: list[Verse]) -> list[Verse]:
+        stripped = [
+            Verse(
+                verse_number=verse.verse_number,
+                text=self._normalize_text(BSKOREA_SONG_SPEAKER_LABEL_PATTERN.sub(" ", verse.text)),
+            )
+            for verse in verses
+        ]
+        emptied = [verse.verse_number for verse in stripped if not verse.text]
+        if emptied:
+            # This runs after the parser's gap check, so a verse that was only a label
+            # would be dropped as empty and leave a gap nothing reports.
+            logger.warning(
+                "bskorea Song of Songs verses %s hold only a speaker label; chapter skipped", emptied
+            )
+            return []
+        return stripped
+
     @staticmethod
     def _is_bskorea_verse_span(tag: Tag) -> bool:
         return tag.name == "span" and tag.find("span", class_="number", recursive=False) is not None
@@ -1588,6 +1604,10 @@ class HolyBibleScraper:
         for removable in working.select(BSKOREA_REMOVABLE_SELECTOR):
             removable.decompose()
         for hidden in working.find_all(style=True):
+            # A styled node inside a hidden one was destroyed with it; reading its
+            # attributes would raise.
+            if hidden.decomposed:
+                continue
             style = hidden.get("style", "")
             if isinstance(style, str) and "display:none" in style.lower().replace(" ", ""):
                 hidden.decompose()

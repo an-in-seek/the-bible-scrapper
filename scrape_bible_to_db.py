@@ -10,7 +10,7 @@ from urllib.parse import parse_qsl, urlparse
 
 from db import BibleRepository, get_db_connection
 from models import Book
-from scraper import BSKOREA_BOOK_CODE_OVERRIDES, DEFAULT_ENTRY_URL, HolyBibleScraper
+from scraper import DEFAULT_ENTRY_URL, HolyBibleScraper
 
 BOOK_TRANSITION_DELAY_SECONDS = 5
 
@@ -517,7 +517,7 @@ def resolve_book_code_for_source(scraper: HolyBibleScraper, book: Book) -> str |
 
     candidate = (book.book_key or "").strip().lower()
     # book_key is USFM ("JON"); bskorea calls Jonah "jnh".
-    candidate = BSKOREA_BOOK_CODE_OVERRIDES.get(candidate, candidate)
+    candidate = HolyBibleScraper._to_bskorea_book_code(candidate)
     canonical = scraper._get_bskorea_book_code(book.book_order)
     if candidate:
         if canonical and candidate != canonical:
