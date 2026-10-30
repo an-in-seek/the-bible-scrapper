@@ -4,7 +4,12 @@ import unicodedata
 import pytest
 from bs4 import BeautifulSoup
 
-from scraper import BIBLEGATEWAY_BOOK_NAMES, OMITTED_VERSE_TEXT, HolyBibleScraper
+from scraper import (
+    BIBLEGATEWAY_BOOK_NAMES,
+    BSKOREA_OMITTED_VERSE_TEXT,
+    OMITTED_VERSE_TEXT,
+    HolyBibleScraper,
+)
 
 
 def test_parse_verses_with_regex_fallback() -> None:
@@ -301,6 +306,197 @@ def test_parse_verses_from_bskorea_keeps_korean_particles_attached() -> None:
 
     assert len(verses) == 1
     assert verses[0].text == "모세가 모압 평지에서 느보 산에 올라가"
+
+
+BSKOREA_SAENEW_ENTRY_URL = (
+    "https://www.bskorea.or.kr/bible/korbibReadpage.php"
+    "?version=SAENEW&book=gen&chap=1&sec=1&cVersion=&fontSize=15px&fontWeight=normal"
+)
+
+
+def _bskorea_page(*verse_spans: str) -> str:
+    """A 새번역 reading page; each argument is the inside of one verse span."""
+    body = "".join(f"<span>{span}</span><br />" for span in verse_spans)
+    return (
+        '<div id="tdBible1" class="bible_read"><b>새번역</b><br/>'
+        "<font style='display:none;' size=2>책</font><font class=\"chapNum\">제 1 장</font>"
+        '<br /><br /><font class="smallTitle">소제목</font><br /><br />'
+        f"{body}</div>"
+    )
+
+
+def _number(value: str) -> str:
+    return f'<span class="number">{value}&nbsp;&nbsp;&nbsp;</span>'
+
+
+def _bskorea_verses(html: str) -> dict[int, str]:
+    scraper = HolyBibleScraper(entry_url=BSKOREA_SAENEW_ENTRY_URL)
+    return {verse.verse_number: verse.text for verse in scraper.parse_verses_from_html(html)}
+
+
+def test_bskorea_book_code_for_jonah_is_jnh() -> None:
+    scraper = HolyBibleScraper(entry_url=BSKOREA_SAENEW_ENTRY_URL)
+
+    # Every bskorea version calls Jonah "jnh"; book=jon is an empty page.
+    assert scraper._get_bskorea_book_code(32) == "jnh"
+    assert "book=jnh&chap=1&" in scraper._build_chapter_url(32, 1)
+    assert "book=jnh&chap=4&" in scraper._build_chapter_url(32, 4, book_code="jon")
+    assert scraper._get_bskorea_book_code(31) == "oba"
+
+
+def test_get_source_version_reports_gae_for_bskorea_url_without_version() -> None:
+    versionless = HolyBibleScraper(
+        entry_url="https://www.bskorea.or.kr/bible/korbibReadpage.php?book=gen&chap=1"
+    )
+
+    # The builder fetches GAE here, so the compatibility check must see GAE, not None.
+    assert versionless.get_source_version() == "GAE"
+    assert "version=GAE&" in versionless._build_chapter_url(1, 1)
+    assert HolyBibleScraper(entry_url=BSKOREA_SAENEW_ENTRY_URL).get_source_version() == "SAENEW"
+
+
+def test_parse_verses_from_bskorea_reads_verses_under_unclosed_psalm_title() -> None:
+    # 새번역 opens a titled psalm with <H VAL=1.1> and never closes it, so html.parser
+    # nests every verse span inside it.
+    html = (
+        '<div id="tdBible1" class="bible_read"><b>새번역</b><br/>'
+        '<font class="chapNum">제 3 편</font><br /><br /><font class="smallTitle">아침 기도</font><br />'
+        "<H VAL=1.1>표제 문장이다<br/><br/>"
+        f"<span>{_number('1')}첫째 줄이다.</span><br />"
+        f"<span>{_number('2')}둘째 줄이다."
+        "<font size=2><a class=comment href=\"#\"><font size=2>1)</font></a></font> (셀라)"
+        "<div id='D_1' class=D2 style='display:none;z-index:100'>숨김 각주</div></span><br />"
+        "</div>"
+    )
+
+    verses = _bskorea_verses(html)
+
+    assert verses == {1: "첫째 줄이다.", 2: "둘째 줄이다. (셀라)"}
+
+
+def test_parse_verses_from_bskorea_drops_mid_verse_heading() -> None:
+    html = _bskorea_page(
+        f"{_number('1')}앞 문장이다.<br /><br /><br />"
+        '<font class="smallTitle">새 단락(<a TAR="BSAENEWmat028001">마 28:1-10</a>)</font>'
+        "<br /><font size='1'></font>뒤 문장이다.",
+    )
+
+    assert _bskorea_verses(html) == {1: "앞 문장이다. 뒤 문장이다."}
+
+
+def test_parse_verses_from_bskorea_reads_line_break_as_space() -> None:
+    html = _bskorea_page(
+        f"{_number('1')}<font class=\"name\">모세</font>가 말했다.<br /><font size='1'></font>그리고 갔다.",
+    )
+
+    # get_text("") alone would store "말했다.그리고"; the particle must stay attached.
+    assert _bskorea_verses(html) == {1: "모세가 말했다. 그리고 갔다."}
+
+
+def test_parse_verses_from_bskorea_turns_omission_marker_into_placeholder() -> None:
+    html = _bskorea_page(
+        f"{_number('1')}첫째 절이다.",
+        f"{_number('2')}둘째 절이다. "
+        '<font size=2><a class=comment href="#"><font size=2>4)</font></a></font>(3절 없음)'
+        "<div class=D2 style='display:none'>다른 사본에는 셋째 절이 있음</div>",
+        f"{_number('4')}넷째 절이다.",
+    )
+
+    assert _bskorea_verses(html) == {
+        1: "첫째 절이다.",
+        2: "둘째 절이다.",
+        3: BSKOREA_OMITTED_VERSE_TEXT,
+        4: "넷째 절이다.",
+    }
+
+
+def test_parse_verses_from_bskorea_handles_half_verse_omission_marker() -> None:
+    # Acts 24: "6절 하반부터 8절 상반까지" leaves 6 and 8 with their halves, 7 empty.
+    html = _bskorea_page(
+        f"{_number('1')}첫째 절이다.",
+        f"{_number('2')}둘째 절 앞부분이다. (2절 하반부터 4절 상반까지 없음)",
+        f"{_number('4')}넷째 절 뒷부분이다.",
+    )
+
+    assert _bskorea_verses(html) == {
+        1: "첫째 절이다.",
+        2: "둘째 절 앞부분이다.",
+        3: BSKOREA_OMITTED_VERSE_TEXT,
+        4: "넷째 절 뒷부분이다.",
+    }
+
+
+def test_parse_verses_from_bskorea_keeps_placeholder_span_printed_by_gae() -> None:
+    # 개역개정 prints the omitted verse in its own span; that is source text.
+    html = _bskorea_page(
+        f"{_number('1')}첫째 절이다.",
+        f"{_number('2')}{BSKOREA_OMITTED_VERSE_TEXT}",
+        f"{_number('3')}셋째 절이다.",
+    )
+
+    assert _bskorea_verses(html) == {1: "첫째 절이다.", 2: BSKOREA_OMITTED_VERSE_TEXT, 3: "셋째 절이다."}
+
+
+def test_parse_verses_from_bskorea_stores_merged_range_at_every_number() -> None:
+    html = _bskorea_page(
+        f"{_number('1')}첫째 절이다.",
+        f"{_number('2-3')}둘째와 셋째 절이다.",
+        f"{_number('4')}넷째 절이다.",
+    )
+
+    assert _bskorea_verses(html) == {
+        1: "첫째 절이다.",
+        2: "둘째와 셋째 절이다.",
+        3: "둘째와 셋째 절이다.",
+        4: "넷째 절이다.",
+    }
+
+
+@pytest.mark.parametrize(
+    "spans",
+    [
+        # A marker in a form the parser does not know.
+        (f"{_number('1')}첫째 절이다. (2절과 3절은 없음)", f"{_number('4')}넷째 절이다."),
+        # A gap no marker explains.
+        (f"{_number('1')}첫째 절이다.", f"{_number('3')}셋째 절이다."),
+        # A marker naming a verse that has its own span.
+        (f"{_number('1')}첫째 절이다. (2절 없음)", f"{_number('2')}둘째 절이다."),
+        # A verse number that is neither N nor N-M.
+        (f"{_number('1')}첫째 절이다.", f"{_number('2a')}둘째 절이다."),
+    ],
+)
+def test_parse_verses_from_bskorea_refuses_a_chapter_that_does_not_add_up(spans: tuple[str, ...]) -> None:
+    assert _bskorea_verses(_bskorea_page(*spans)) == {}
+
+
+def test_bskorea_page_without_verses_does_not_fall_through_to_generic_parsers() -> None:
+    # book=jon returns a reading page with no verse spans; the rest of the page still
+    # holds text the generic parsers read as verses.
+    html = (
+        '<html><body><div id="tdBible1" class="bible_read"><b>새번역</b></div>'
+        "<main><div>1 첫째 줄로 보이는 글이다.</div><div>2 둘째 줄로 보이는 글이다.</div></main>"
+        "</body></html>"
+    )
+
+    assert HolyBibleScraper(entry_url="https://example.com").parse_verses_from_html(html)
+    assert _bskorea_verses(html) == {}
+
+
+def test_fetch_chapter_payload_strips_song_of_songs_speaker_labels() -> None:
+    html = _bskorea_page(
+        f"{_number('1')}첫째 노래이다. (여자)",
+        f"{_number('2')}둘째 노래이다. (남자) 셋째 말이다. (친구들)",
+    )
+
+    def payload_for(book_order: int) -> dict[int, str]:
+        scraper = HolyBibleScraper(entry_url=BSKOREA_SAENEW_ENTRY_URL)
+        scraper._fetch_soup = lambda url: BeautifulSoup(html, "html.parser")
+        payload = scraper.fetch_chapter_payload(book_order, 1, chapter_url=BSKOREA_SAENEW_ENTRY_URL)
+        return {verse.verse_number: verse.text for verse in payload.verses}
+
+    assert payload_for(22) == {1: "첫째 노래이다.", 2: "둘째 노래이다. 셋째 말이다."}
+    # Only Song of Songs: the same strings elsewhere are left alone.
+    assert payload_for(1) == {1: "첫째 노래이다. (여자)", 2: "둘째 노래이다. (남자) 셋째 말이다. (친구들)"}
 
 
 BIBLEGATEWAY_ENTRY_URL = "https://www.biblegateway.com/passage/?search=Genesis%201&version=WEB"

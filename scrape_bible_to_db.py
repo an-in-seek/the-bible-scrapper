@@ -10,7 +10,7 @@ from urllib.parse import parse_qsl, urlparse
 
 from db import BibleRepository, get_db_connection
 from models import Book
-from scraper import DEFAULT_ENTRY_URL, HolyBibleScraper
+from scraper import BSKOREA_BOOK_CODE_OVERRIDES, DEFAULT_ENTRY_URL, HolyBibleScraper
 
 BOOK_TRANSITION_DELAY_SECONDS = 5
 
@@ -30,10 +30,12 @@ ENTRY_URL_ENV_BY_TRANSLATION_TYPE = {
     "LSG1910": "LSG1910_ENTRY_URL",
     "NIV": "NIV_ENTRY_URL",
     "ESV": "ESV_ENTRY_URL",
+    "RNKSV": "RNKSV_ENTRY_URL",
 }
-# A language code alone does not identify a source: 'en' covers KJV, WEB, ASV, NIV and ESV.
+# A language code alone does not identify a source: 'en' covers KJV, WEB, ASV, NIV and ESV,
+# 'ko' covers NKRV and RNKSV.
 TRANSLATION_TYPES_BY_LANGUAGE_CODE = {
-    "ko": ("NKRV",),
+    "ko": ("NKRV", "RNKSV"),
     "en": ("KJV", "WEB", "ASV", "NIV", "ESV"),
     "es": ("RVR1909", "SBLM"),
     "ja": ("JPNMEB", "KOUGO"),
@@ -47,7 +49,7 @@ LEGACY_TRANSLATION_TYPE_BY_ID = {"2": "NKRV"}
 # Tie-break when nothing else narrows it down; keeps the pre-WEB default.
 ENTRY_URL_PREFERENCE_ORDER = (
     "NKRV", "KJV", "WEB", "ASV", "RVR1909", "SBLM", "JPNMEB", "KOUGO", "CUVT", "CUVS",
-    "N1904", "LSG1910", "NIV", "ESV",
+    "N1904", "LSG1910", "NIV", "ESV", "RNKSV",
 )
 # Which source may legitimately produce each translation, and how to recognise the
 # translation when bible_translation.translation_type is empty. Drives the
@@ -153,6 +155,15 @@ TRANSLATION_SOURCE_REQUIREMENTS = {
         "version": "ESV",
         "name": "English Standard Version",
         "language_code": "en",
+    },
+    "RNKSV": {
+        # 새번역 (2001), copyrighted by the Korean Bible Society like NKRV. Same source
+        # as NKRV, so only the version tells them apart; the site also serves SAE
+        # (표준새번역 1993), a separate edition the exact match keeps out.
+        "source": "bskorea",
+        "version": "SAENEW",
+        "name": "새번역",
+        "language_code": "ko",
     },
 }
 
@@ -505,6 +516,8 @@ def resolve_book_code_for_source(scraper: HolyBibleScraper, book: Book) -> str |
         return None
 
     candidate = (book.book_key or "").strip().lower()
+    # book_key is USFM ("JON"); bskorea calls Jonah "jnh".
+    candidate = BSKOREA_BOOK_CODE_OVERRIDES.get(candidate, candidate)
     canonical = scraper._get_bskorea_book_code(book.book_order)
     if candidate:
         if canonical and candidate != canonical:
