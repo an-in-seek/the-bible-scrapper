@@ -31,7 +31,7 @@
 - LSG1910(프랑스어; Ostervald · Martin은 보류): [docs/french-public-domain-scraping-design.md](docs/french-public-domain-scraping-design.md)
 - NIV(저작권 역본): [docs/new-international-version-scraping-design.md](docs/new-international-version-scraping-design.md)
 - ESV(저작권 역본): [docs/english-standard-version-scraping-design.md](docs/english-standard-version-scraping-design.md)
-- 새번역 RNKSV(저작권 역본, 구현·미적재): [docs/revised-new-korean-standard-version-scraping-design.md](docs/revised-new-korean-standard-version-scraping-design.md)
+- 새번역 RNKSV(저작권 역본): [docs/revised-new-korean-standard-version-scraping-design.md](docs/revised-new-korean-standard-version-scraping-design.md)
 
 ## 주요 특징
 
@@ -68,7 +68,7 @@
 - `docs/french-public-domain-scraping-design.md`: LSG1910(프랑스어 Louis Segond 1910) 설계 문서. Ostervald·Martin 보류 근거 포함
 - `docs/new-international-version-scraping-design.md`: NIV 설계 문서 (저작권 역본). 적재 결과와 기존 WEB·ASV의 `h4` 오염 발견 기록 포함
 - `docs/english-standard-version-scraping-design.md`: ESV 설계 문서 (저작권 역본). 실측 결과와 권리 사항 포함
-- `docs/revised-new-korean-standard-version-scraping-design.md`: 새번역(RNKSV) 설계 문서 (저작권 역본, 구현·미적재). 표본 실측과, 개역개정과 공유하는 bskorea 경로의 결함(요나 `jnh`, 시편 표제 래퍼, 병합 절 번호 등)과 그 수정 포함
+- `docs/revised-new-korean-standard-version-scraping-design.md`: 새번역(RNKSV) 설계 문서 (저작권 역본). 표본 실측, 적재 결과, 개역개정과 공유하는 bskorea 경로의 결함(요나 `jnh`, 시편 표제 래퍼, 병합 절 번호 등)과 그 수정 포함
 
 ## 요구 사항
 
@@ -546,11 +546,13 @@ ESV_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=E
 ### 14. RNKSV `bskorea.or.kr`
 
 성경전서 새번역(2001, `version=SAENEW`)도 **저작권 역본**입니다(대한성서공회). 개역개정과 같은 소스·같은 파서를 쓰며, 엔트리 URL 해석과 소스/역본 검증에 `RNKSV`로 등록되어 있습니다. 같은 사이트의 `SAE`(표준새번역 1993)는 별개 판본이라 거부합니다.
-**구현만 했고 적재하지 않았습니다**(2026-10-30). 적재 여부는 [설계 문서](docs/revised-new-korean-standard-version-scraping-design.md) 2절의 권리 사항을 보고 따로 결정합니다.
+사용자가 권리 사항을 전달받은 뒤, 상용 배포 없이 개인 열람용 DB로 보관한다는 판단으로 적재를 지시했습니다. 결과는 66권 / 1,189장 / **31,102절**입니다(2026-10-30–31, 3~6초 간격으로 약 1시간 35분).
+KJV에 없는 좌표는 요삼 1:15와 계 12:18이고, KJV에만 있는 좌표는 고후 13:14와 겔 15:8입니다. 겔 15:8은 페이지가 7절까지만 번호를 달고 8절 내용을 7절에 이어 둔 경우입니다. 근거와 검증은 [설계 문서](docs/revised-new-korean-standard-version-scraping-design.md) 2절과 16절에 있습니다. **이 DB는 자유롭게 배포할 수 없습니다.**
 
 - 새번역은 생략한 절(마 17:21 등 표본 14곳)에 스팬을 만들지 않고 앞 절 끝에 `(21절 없음)` 같은 표지를 붙입니다. 파서는 표지를 떼어 내고, 가리킨 절을 `(없음)` 행으로 저장합니다. 개역개정 페이지가 생략 절의 자기 스팬에 싣는 `(없음)`과 같은 값입니다. 다만 DB의 NKRV는 같은 14곳 중 행 8:37이 `없음`, 24:7이 `（없음）`(전각 괄호)이라 이 두 곳만 글자가 다릅니다.
 - 표제가 있는 시편은 닫히지 않은 `<H VAL=1.1>` 안에 절이 들어 있어 절을 깊이와 상관없이 찾습니다. 표제는 저장하지 않습니다.
 - 절 중간의 소제목(`font.smallTitle`)과 평행 본문 참조는 지우고, 절 안 줄바꿈(`<br>`)은 공백 하나로 읽습니다.
+  `<br>` 없이 빈 `<font size='1'>`만으로 문단을 나눈 곳(22절)은 앞이 문장 끝 부호이고 뒤가 한글(여는 따옴표 뒤 포함)일 때만 공백으로 읽고, 다른 자리에서는 지웁니다.
 - 아가의 화자 표기 `(여자)`·`(남자)`·`(친구들)`은 일반 텍스트라 아가(22권)에서만 지웁니다.
 - 엔트리 URL에 `version=`이 없으면 사이트가 개역개정을 주므로, 그런 URL은 RNKSV 행에 넣지 않고 중단합니다.
 

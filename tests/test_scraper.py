@@ -393,6 +393,54 @@ def test_parse_verses_from_bskorea_reads_line_break_as_space() -> None:
     assert _bskorea_verses(html) == {1: "모세가 말했다. 그리고 갔다."}
 
 
+def test_parse_verses_from_bskorea_reads_paragraph_mark_after_sentence_as_space() -> None:
+    # Some paragraphs start with only an empty <font size='1'> and no <br> (Ezra 6:3).
+    html = _bskorea_page(
+        f"{_number('1')}첫 문장이다.<font size='1'></font>둘째 문장이다.",
+        f"{_number('2')}그가 말했다.\"<font size='1'></font>그러자 갔다.",
+        f"{_number('3')}편지는 이렇다.<font size='1'></font>\"왕에게 올린다.\"",
+        # No sentence end before the mark: dropped, never a space inside a word.
+        f"{_number('4')}<font class=\"name\">모</font><font size='1'></font>세가 갔다.",
+        # The source attaches the quote particle directly, with no mark: left as is.
+        f"{_number('5')}\"가겠느냐?\"하고 물었다.",
+        # The opening quote is a text node of its own before a name (Ezra 4:11).
+        f"{_number('6')}편지는 이렇다.<font size='1'></font>\"<font class=\"name\">다윗</font> 왕에게.\"",
+    )
+
+    assert _bskorea_verses(html) == {
+        1: "첫 문장이다. 둘째 문장이다.",
+        2: "그가 말했다.\" 그러자 갔다.",
+        3: "편지는 이렇다. \"왕에게 올린다.\"",
+        4: "모세가 갔다.",
+        5: "\"가겠느냐?\"하고 물었다.",
+        6: "편지는 이렇다. \"다윗 왕에게.\"",
+    }
+
+
+def test_parse_verses_from_bskorea_drops_paragraph_mark_outside_sentence_join() -> None:
+    html = _bskorea_page(
+        # Verse 2's number span follows verse 1 with no <br>, so the mark inside it has a
+        # sentence end before it; it must go before the number is read, not refuse the page.
+        f"{_number('1')}첫째 절이다.</span><span>"
+        f"<span class=\"number\"><font size='1'></font>2&nbsp;&nbsp;&nbsp;</span>둘째 절이다.",
+        # A sentence end, but no letter after it.
+        f"{_number('3')}그가 말했다.<font size='1'></font>-그리고 갔다.",
+        # A letter after it, but no sentence end before it.
+        f"{_number('4')}그래서,<font size='1'></font>그는 \"……<font size='1'></font>그만\" "
+        f"「책」<font size='1'></font>에 썼다.",
+        # Whitespace inside the font is source text: kept, not a mark.
+        f"{_number('5')}갔다.<font size='1'> </font>왔다.",
+    )
+
+    assert _bskorea_verses(html) == {
+        1: "첫째 절이다.",
+        2: "둘째 절이다.",
+        3: "그가 말했다.-그리고 갔다.",
+        4: "그래서,그는 \"……그만\" 「책」에 썼다.",
+        5: "갔다. 왔다.",
+    }
+
+
 def test_parse_verses_from_bskorea_turns_omission_marker_into_placeholder() -> None:
     html = _bskorea_page(
         f"{_number('1')}첫째 절이다.",

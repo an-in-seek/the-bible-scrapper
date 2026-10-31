@@ -71,6 +71,11 @@ BSKOREA_VERSE_NUMBER_PATTERN = re.compile(r"^(\d{1,3})(?:-(\d{1,3}))?$")
 BSKOREA_OMITTED_MARKER_PATTERN = re.compile(
     r"\s*\((\d{1,3})절(?: 하반부터 (\d{1,3})절 상반까지)? 없음\)$"
 )
+# An empty <font size='1'> is some pages' only paragraph break: a space when the text
+# before it ends a sentence and the text after it starts with Hangul (optionally after
+# an opening quote), dropped everywhere else.
+BSKOREA_SENTENCE_END_PATTERN = re.compile(r"[.?!][\"'”’]?$")
+BSKOREA_PARAGRAPH_START_PATTERN = re.compile(r"[\"'“‘]?[가-힣]")
 # Stored for the verses such a marker names. GAE prints the same text in the omitted
 # verse's own span, so NKRV already holds it at the same 14 coordinates.
 BSKOREA_OMITTED_VERSE_TEXT = "(없음)"
@@ -1581,6 +1586,22 @@ class HolyBibleScraper:
         return stripped
 
     @staticmethod
+    def _bskorea_text_beside(elements: Iterable[PageElement], *, preceding: bool, length: int = 2) -> str:
+        """
+        The `length` characters nearest a node, read outward through `elements`.
+
+        Read across text nodes: a quote is often a node of its own ('"' then a
+        `font.name`), and the first node alone would hide the letter after it.
+        """
+        text = ""
+        for element in elements:
+            if isinstance(element, NavigableString):
+                text = element + text if preceding else text + element
+                if len(text) >= length:
+                    break
+        return text[-length:] if preceding else text[:length]
+
+    @staticmethod
     def _is_bskorea_verse_span(tag: Tag) -> bool:
         return tag.name == "span" and tag.find("span", class_="number", recursive=False) is not None
 
@@ -1616,6 +1637,19 @@ class HolyBibleScraper:
         # here cannot split a particle off its noun.
         for line_break in working.find_all("br"):
             line_break.replace_with(" ")
+        # Some paragraph breaks have no <br>, only an empty <font size='1'> (22 verses in
+        # 새번역, e.g. Ezra 6:3). Decided here, before verse numbers are read, so a mark
+        # inside a number span is simply dropped. Only a mark between a sentence end and
+        # Hangul becomes a space, which can never split a word.
+        for paragraph_mark in working.find_all("font", attrs={"size": "1"}):
+            if paragraph_mark.get_text():
+                continue
+            before = self._bskorea_text_beside(paragraph_mark.previous_elements, preceding=True)
+            after = self._bskorea_text_beside(paragraph_mark.next_elements, preceding=False)
+            if BSKOREA_SENTENCE_END_PATTERN.search(before) and BSKOREA_PARAGRAPH_START_PATTERN.match(after):
+                paragraph_mark.replace_with(" ")
+            else:
+                paragraph_mark.decompose()
 
         # Collected before any number span is removed: removing it is what would stop an
         # outer verse span from being recognised as one.
