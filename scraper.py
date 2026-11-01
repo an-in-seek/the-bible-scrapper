@@ -122,6 +122,9 @@ BIBLEGATEWAY_CONTAINER_REMOVABLE_SELECTOR = (
     "div.footnotes, div.crossrefs, h2, h4, p.psalm-title, h3, "
     "p.translation-note, a.full-chap-link, div.passage-other-trans"
 )
+# The only `h2` seen in a passage. Any other is still dropped, with a warning, since
+# that rule rests on these five places alone.
+BIBLEGATEWAY_PSALTER_BOOK_HEADING_TOKENS = frozenset(f"Ps-{psalm}-1" for psalm in (1, 42, 73, 90, 107))
 # Dropped from each verse span. Kept separate from the container pass so a span can
 # still be inspected for the footnote marker that flags an untranslated verse.
 BIBLEGATEWAY_INLINE_REMOVABLE_SELECTOR = (
@@ -1791,8 +1794,13 @@ class HolyBibleScraper:
         working = BeautifulSoup(str(container), "html.parser")
         # `h3` goes last: a few hold verse text, judged against what is left.
         for removable in working.select(BIBLEGATEWAY_CONTAINER_REMOVABLE_SELECTOR):
-            if removable.name != "h3":
-                removable.decompose()
+            if removable.name == "h3":
+                continue
+            if removable.name == "h2":
+                tokens = {self._biblegateway_verse_token(span) for span in removable.select("span.text")} - {None}
+                if tokens - BIBLEGATEWAY_PSALTER_BOOK_HEADING_TOKENS:
+                    logger.warning("BibleGateway h2 tagged %s is not a Psalter book heading; dropped", sorted(tokens))
+            removable.decompose()
         self._restore_biblegateway_verse_text_in_headings(working)
         for heading in working.select("h3"):
             heading.decompose()

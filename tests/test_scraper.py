@@ -1115,6 +1115,26 @@ def test_parse_verses_from_biblegateway_drops_psalter_book_heading(version: str,
     assert [(verse.verse_number, verse.text) for verse in verses] == [(1, "첫 줄 둘째 줄"), (2, "다음 절")]
 
 
+@pytest.mark.parametrize(("token", "warned"), [("Ps-42-1", False), ("Isa-40-1", True)])
+def test_parse_verses_from_biblegateway_warns_about_h2_outside_psalter_book_headings(
+    token: str, warned: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    # An h2 is dropped either way; only the five book headings are known to hold no verse text.
+    html = f"""
+    <div class="passage-text"><div class="version-KLB">
+      <h2><span class="text {token}">머리글</span></h2>
+      <p><span class="text {token}"><sup class="versenum">1 </sup>첫 절</span></p>
+    </div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_KLB_ENTRY_URL)
+
+    with caplog.at_level("WARNING"):
+        verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.text for verse in verses] == ["첫 절"]
+    assert ("is not a Psalter book heading" in caplog.text) is warned
+
+
 def test_biblegateway_page_does_not_fall_through_to_generic_parsers() -> None:
     # A page the BibleGateway parser cannot read must not be handed to the generic
     # parsers, which read numbered lines anywhere on the page as verses.
