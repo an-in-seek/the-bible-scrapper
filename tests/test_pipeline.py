@@ -74,6 +74,8 @@ class FakeScraper:
     _get_wikisource_variant = HolyBibleScraper._get_wikisource_variant
     _is_studybible_source = HolyBibleScraper._is_studybible_source
     _get_studybible_version = HolyBibleScraper._get_studybible_version
+    _is_bskorea_source = HolyBibleScraper._is_bskorea_source
+    _get_bskorea_version = HolyBibleScraper._get_bskorea_version
 
     def __init__(self, entry_url: str) -> None:
         self.entry_url = entry_url
@@ -597,6 +599,14 @@ NIV_TRANSLATION_METADATA = {
     "translation_type": "NIV",
 }
 
+# An English row the requirements table does not know.
+NASB_TRANSLATION_METADATA = {
+    "id": 13,
+    "language_code": "en",
+    "name": "New American Standard Bible",
+    "translation_type": "NASB",
+}
+
 
 def test_validate_source_translation_compatibility_for_biblegateway_niv() -> None:
     repo = FakeRepo()
@@ -609,13 +619,12 @@ def test_validate_source_translation_compatibility_for_biblegateway_niv() -> Non
 
 def test_validate_source_translation_compatibility_separates_niv_from_other_biblegateway_translations() -> None:
     """NIV must pass for none of the other BibleGateway rows, nor for an English row the
-    table does not know (ESV is in the DB with no source): before NIV had its own row,
+    table does not know (NASB is in the DB with no source): before NIV had its own row,
     `version=NIV` had no expected translation and that last pair passed."""
-    esv_metadata = {"id": 12, "language_code": "en", "name": "English Standard Version", "translation_type": "ESV"}
     pairs = [
         (BIBLEGATEWAY_NIV_ENTRY_URL, WEB_TRANSLATION_METADATA),
         (BIBLEGATEWAY_NIV_ENTRY_URL, ASV_TRANSLATION_METADATA),
-        (BIBLEGATEWAY_NIV_ENTRY_URL, esv_metadata),
+        (BIBLEGATEWAY_NIV_ENTRY_URL, NASB_TRANSLATION_METADATA),
         (BIBLEGATEWAY_WEB_ENTRY_URL, NIV_TRANSLATION_METADATA),
         (BIBLEGATEWAY_ASV_ENTRY_URL, NIV_TRANSLATION_METADATA),
         # NIVUK is a different edition on the same site.
@@ -679,6 +688,190 @@ def test_resolve_default_entry_url_rejects_english_ambiguity_with_niv() -> None:
             assert "Ambiguous entry URL" in str(exc)
         else:
             raise AssertionError("expected ValueError")
+
+
+BIBLEGATEWAY_ESV_ENTRY_URL = "https://www.biblegateway.com/passage/?search=Genesis%201&version=ESV"
+
+ESV_TRANSLATION_METADATA = {
+    "id": 12,
+    "language_code": "en",
+    "name": "English Standard Version",
+    "translation_type": "ESV",
+}
+
+
+def test_validate_source_translation_compatibility_for_biblegateway_esv() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(ESV_TRANSLATION_METADATA)
+    scraper = BibleGatewayScraper(BIBLEGATEWAY_ESV_ENTRY_URL)
+
+    validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+
+
+def test_validate_source_translation_compatibility_recognises_esv_by_identity() -> None:
+    # translation_type empty: the row is recognised from (name, language_code).
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = {**ESV_TRANSLATION_METADATA, "translation_type": None}
+    scraper = BibleGatewayScraper(BIBLEGATEWAY_ESV_ENTRY_URL)
+
+    validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+
+
+def test_validate_source_translation_compatibility_separates_esv_from_other_biblegateway_translations() -> None:
+    pairs = [
+        (BIBLEGATEWAY_ESV_ENTRY_URL, WEB_TRANSLATION_METADATA),
+        (BIBLEGATEWAY_ESV_ENTRY_URL, ASV_TRANSLATION_METADATA),
+        (BIBLEGATEWAY_ESV_ENTRY_URL, NIV_TRANSLATION_METADATA),
+        (BIBLEGATEWAY_ESV_ENTRY_URL, NASB_TRANSLATION_METADATA),
+        (BIBLEGATEWAY_WEB_ENTRY_URL, ESV_TRANSLATION_METADATA),
+        (BIBLEGATEWAY_ASV_ENTRY_URL, ESV_TRANSLATION_METADATA),
+        (BIBLEGATEWAY_NIV_ENTRY_URL, ESV_TRANSLATION_METADATA),
+        # ESVUK is a different edition on the same site.
+        ("https://www.biblegateway.com/passage/?search=Genesis%201&version=ESVUK", ESV_TRANSLATION_METADATA),
+    ]
+    for entry_url, metadata in pairs:
+        repo = FakeRepo()
+        conn = FakeConn()
+        conn.translation_metadata = dict(metadata)
+        scraper = BibleGatewayScraper(entry_url)
+        try:
+            validate_source_translation_compatibility(repo=repo, conn=conn, scraper=scraper)
+        except RuntimeError as exc:
+            assert "Source/translation mismatch" in str(exc)
+        else:
+            raise AssertionError(f"expected RuntimeError for {entry_url} + {metadata['translation_type']}")
+
+
+def test_resolve_default_entry_url_prefers_esv_when_translation_type_is_esv() -> None:
+    with _with_entry_url_env(
+        {
+            "KJV_ENTRY_URL": "https://thekingsbible.com/Bible/1/1",
+            "NIV_ENTRY_URL": BIBLEGATEWAY_NIV_ENTRY_URL,
+            "ESV_ENTRY_URL": BIBLEGATEWAY_ESV_ENTRY_URL,
+            "BIBLE_TRANSLATION_TYPE": "ESV",
+        }
+    ):
+        assert resolve_default_entry_url() == BIBLEGATEWAY_ESV_ENTRY_URL
+
+
+def test_resolve_default_entry_url_rejects_english_ambiguity_with_esv() -> None:
+    with _with_entry_url_env(
+        {
+            "NIV_ENTRY_URL": BIBLEGATEWAY_NIV_ENTRY_URL,
+            "ESV_ENTRY_URL": BIBLEGATEWAY_ESV_ENTRY_URL,
+            "BIBLE_LANGUAGE_CODE": "en",
+        }
+    ):
+        try:
+            resolve_default_entry_url()
+        except ValueError as exc:
+            assert "Ambiguous entry URL" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")
+
+
+BSKOREA_NKRV_ENTRY_URL = (
+    "https://www.bskorea.or.kr/bible/korbibReadpage.php"
+    "?version=GAE&book=gen&chap=1&sec=1&cVersion=&fontSize=15px&fontWeight=normal"
+)
+BSKOREA_RNKSV_ENTRY_URL = (
+    "https://www.bskorea.or.kr/bible/korbibReadpage.php"
+    "?version=SAENEW&book=gen&chap=1&sec=1&cVersion=&fontSize=15px&fontWeight=normal"
+)
+
+RNKSV_TRANSLATION_METADATA = {
+    "id": 3,
+    "language_code": "ko",
+    "name": "새번역",
+    "translation_type": "RNKSV",
+}
+
+
+def test_validate_source_translation_compatibility_for_bskorea_saenew() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(RNKSV_TRANSLATION_METADATA)
+
+    validate_source_translation_compatibility(
+        repo=repo, conn=conn, scraper=FakeScraper(BSKOREA_RNKSV_ENTRY_URL)
+    )
+
+
+def test_validate_source_translation_compatibility_recognises_rnksv_by_identity() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = {**RNKSV_TRANSLATION_METADATA, "translation_type": None}
+
+    validate_source_translation_compatibility(
+        repo=repo, conn=conn, scraper=FakeScraper(BSKOREA_RNKSV_ENTRY_URL)
+    )
+
+
+def test_validate_source_translation_compatibility_separates_rnksv_from_nkrv() -> None:
+    nkrv_metadata = FakeConn().translation_metadata
+    pairs = [
+        (BSKOREA_RNKSV_ENTRY_URL, nkrv_metadata),
+        (BSKOREA_NKRV_ENTRY_URL, RNKSV_TRANSLATION_METADATA),
+        # SAE is 표준새번역 (1993), the edition 새번역 revised.
+        (BSKOREA_RNKSV_ENTRY_URL.replace("SAENEW", "SAE"), RNKSV_TRANSLATION_METADATA),
+        # No version= fetches GAE, so it must not pass as 새번역.
+        ("https://www.bskorea.or.kr/bible/korbibReadpage.php?book=gen&chap=1", RNKSV_TRANSLATION_METADATA),
+    ]
+    for entry_url, metadata in pairs:
+        repo = FakeRepo()
+        conn = FakeConn()
+        conn.translation_metadata = dict(metadata)
+        try:
+            validate_source_translation_compatibility(repo=repo, conn=conn, scraper=FakeScraper(entry_url))
+        except RuntimeError as exc:
+            assert "Source/translation mismatch" in str(exc)
+        else:
+            raise AssertionError(f"expected RuntimeError for {entry_url} + {metadata['translation_type']}")
+
+
+def test_validate_source_translation_compatibility_allows_versionless_bskorea_url_for_nkrv() -> None:
+    validate_source_translation_compatibility(
+        repo=FakeRepo(),
+        conn=FakeConn(),
+        scraper=FakeScraper("https://www.bskorea.or.kr/bible/korbibReadpage.php?book=gen&chap=1"),
+    )
+
+
+def test_resolve_default_entry_url_prefers_rnksv_when_translation_type_is_rnksv() -> None:
+    with _with_entry_url_env(
+        {
+            "NKRV_ENTRY_URL": BSKOREA_NKRV_ENTRY_URL,
+            "RNKSV_ENTRY_URL": BSKOREA_RNKSV_ENTRY_URL,
+            "BIBLE_TRANSLATION_TYPE": "RNKSV",
+        }
+    ):
+        assert resolve_default_entry_url() == BSKOREA_RNKSV_ENTRY_URL
+
+
+def test_resolve_default_entry_url_rejects_korean_ambiguity() -> None:
+    with _with_entry_url_env(
+        {
+            "NKRV_ENTRY_URL": BSKOREA_NKRV_ENTRY_URL,
+            "RNKSV_ENTRY_URL": BSKOREA_RNKSV_ENTRY_URL,
+            "BIBLE_LANGUAGE_CODE": "ko",
+        }
+    ):
+        try:
+            resolve_default_entry_url()
+        except ValueError as exc:
+            assert "Ambiguous entry URL" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")
+
+
+def test_resolve_book_code_for_source_maps_jonah_book_key_to_bskorea_code() -> None:
+    scraper = FakeScraper(BSKOREA_RNKSV_ENTRY_URL)
+    book = Book(id=1076, book_order=32, book_key="JON", abbreviation="욘", name="요나")
+
+    # bskorea answers book=jon with an empty page; it calls Jonah "jnh".
+    assert resolve_book_code_for_source(scraper, book) == "jnh"
 
 
 EBIBLE_RV1909_ENTRY_URL = "https://ebible.org/spaRV1909/GEN01.htm"
