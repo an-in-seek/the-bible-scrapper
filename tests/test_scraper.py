@@ -1093,6 +1093,28 @@ def test_parse_verses_from_biblegateway_drops_heading_after_a_sentence_end_mid_v
     assert [verse.text for verse in verses] == ["Verse eight.", "[Some manuscripts end here.] Verse nine."]
 
 
+@pytest.mark.parametrize(
+    ("version", "book_heading"),
+    [("KLB", "제 1 권"), ("WEB", "BOOK 1"), ("ASV", "Book I")],
+)
+def test_parse_verses_from_biblegateway_drops_psalter_book_heading(version: str, book_heading: str) -> None:
+    # Psalms 1, 42, 73, 90 and 107 open with an h2 book heading tagged with verse 1.
+    # It is no verse text, and it must not make the h3 after it look like a verse slice.
+    html = f"""
+    <div class="passage-text"><div class="version-{version}">
+      <h2><span id="ko-KLB-1" class="text Ps-1-1">{book_heading}</span></h2>
+      <h4><span class="text Ps-1-1">(1-41)</span></h4>
+      <h3><span class="text Ps-1-1">소제목</span></h3>
+      <div class="poetry"><p class="line"><span class="chapter-1"><span class="text Ps-1-1"><span class="chapternum">1 </span>첫 줄</span></span><br/><span class="text Ps-1-1">둘째 줄</span><br/><span id="ko-KLB-2" class="text Ps-1-2"><sup class="versenum">2 </sup>다음 절</span></p></div>
+    </div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=f"https://www.biblegateway.com/passage/?search=Psalm%201&version={version}")
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [(verse.verse_number, verse.text) for verse in verses] == [(1, "첫 줄 둘째 줄"), (2, "다음 절")]
+
+
 def test_biblegateway_page_does_not_fall_through_to_generic_parsers() -> None:
     # A page the BibleGateway parser cannot read must not be handed to the generic
     # parsers, which read numbered lines anywhere on the page as verses.

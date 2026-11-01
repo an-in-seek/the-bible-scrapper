@@ -115,9 +115,11 @@ BIBLEGATEWAY_VERSE_CLASS_PATTERN = re.compile(
 # ("א Aleph."), WEB and NIV mark Song of Songs speakers with `h4.speaker`, sometimes
 # mid-verse. Listing only psalm-title left 22 ASV and at least 27 WEB verses stored
 # with those labels. `p.translation-note` is NIV's "[The earliest manuscripts…]" note,
-# tagged with the class of the verse after it (Mark 16:9, John 7:53).
+# tagged with the class of the verse after it (Mark 16:9, John 7:53). `h2` is the
+# Psalter book heading before Psalms 1, 42, 73, 90 and 107 (WEB "BOOK 1", ASV "Book I",
+# KLB "제 1 권"); WEB and ASV were loaded with it at the head of those five verses.
 BIBLEGATEWAY_CONTAINER_REMOVABLE_SELECTOR = (
-    "div.footnotes, div.crossrefs, h4, p.psalm-title, h3, "
+    "div.footnotes, div.crossrefs, h2, h4, p.psalm-title, h3, "
     "p.translation-note, a.full-chap-link, div.passage-other-trans"
 )
 # Dropped from each verse span. Kept separate from the container pass so a span can
@@ -1742,6 +1744,10 @@ class HolyBibleScraper:
         ends mid-sentence; a real mid-verse heading follows a sentence end (ESV Mark
         16:9, after `.]`). The slice is appended to that fragment as is, so the word
         it splits is joined again. Every mid-verse `h3` is logged for review.
+
+        Runs after every other removable is gone, so "the fragment before" is verse
+        text: KLB's Psalm 1 opens `<h2>제 1 권</h2><h4>(1－41)</h4><h3>…</h3>`, all
+        tagged `Ps-1-1`, and the `h2` once passed for the start of the verse.
         """
         for heading in working.select("h3"):
             spans = heading.select("span.text")
@@ -1751,7 +1757,7 @@ class HolyBibleScraper:
             previous = heading.find_previous(
                 lambda node: node.name == "span"
                 and "text" in node.get("class", [])
-                and node.find_parent(["h3", "h4"]) is None
+                and node.find_parent("h3") is None
                 and node.find_parent("span", class_="text") is None
             )
             if previous is None or self._biblegateway_verse_token(previous) != token:
@@ -1783,9 +1789,13 @@ class HolyBibleScraper:
 
         # Parallel translations render one container per version; keep the first.
         working = BeautifulSoup(str(container), "html.parser")
-        self._restore_biblegateway_verse_text_in_headings(working)
+        # `h3` goes last: a few hold verse text, judged against what is left.
         for removable in working.select(BIBLEGATEWAY_CONTAINER_REMOVABLE_SELECTOR):
-            removable.decompose()
+            if removable.name != "h3":
+                removable.decompose()
+        self._restore_biblegateway_verse_text_in_headings(working)
+        for heading in working.select("h3"):
+            heading.decompose()
 
         fragments: list[tuple[int, int, int, str, bool]] = []
         for node in working.select("span.text"):
