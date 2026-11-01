@@ -1724,6 +1724,50 @@ class HolyBibleScraper:
         verses.sort(key=lambda verse: verse.verse_number)
         return verses
 
+    @staticmethod
+    def _biblegateway_verse_token(node: Tag) -> str | None:
+        for css_class in node.get("class", []):
+            if BIBLEGATEWAY_VERSE_CLASS_PATTERN.match(css_class):
+                return css_class
+        return None
+
+    def _restore_biblegateway_verse_text_in_headings(self, working: BeautifulSoup) -> None:
+        """
+        Move verse text the page wraps in an `h3` back into its verse, before the
+        heading rule deletes it.
+
+        KLB sets a few mid-verse slices in an `h3`, starting inside a word:
+        `…헌금</span></p><h3><span class="text John-8-20">함 앞…</span></h3><p>…`
+        (John 8:20, Acts 24:2). Such an `h3` follows a fragment of the same verse that
+        ends mid-sentence; a real mid-verse heading follows a sentence end (ESV Mark
+        16:9, after `.]`). The slice is appended to that fragment as is, so the word
+        it splits is joined again. Every mid-verse `h3` is logged for review.
+        """
+        for heading in working.select("h3"):
+            spans = heading.select("span.text")
+            token = self._biblegateway_verse_token(spans[0]) if spans else None
+            if token is None:
+                continue
+            previous = heading.find_previous(
+                lambda node: node.name == "span"
+                and "text" in node.get("class", [])
+                and node.find_parent(["h3", "h4"]) is None
+                and node.find_parent("span", class_="text") is None
+            )
+            if previous is None or self._biblegateway_verse_token(previous) != token:
+                continue  # an ordinary heading before the verse it names
+            tail = "".join(
+                string for string in previous.find_all(string=True) if string.find_parent("sup") is None
+            ).rstrip()
+            if not tail[-1:].isalnum():
+                logger.warning("BibleGateway h3 inside verse %s follows a sentence end; dropped as a heading", token)
+                continue
+            logger.warning("BibleGateway h3 inside verse %s continues a sentence; kept as verse text", token)
+            for span in spans:
+                for child in list(span.contents):
+                    previous.append(child.extract())
+            heading.decompose()
+
     def _extract_verses_from_biblegateway_passage(self, soup: BeautifulSoup) -> list[Verse]:
         """
         Parse a BibleGateway passage page:
@@ -1739,6 +1783,7 @@ class HolyBibleScraper:
 
         # Parallel translations render one container per version; keep the first.
         working = BeautifulSoup(str(container), "html.parser")
+        self._restore_biblegateway_verse_text_in_headings(working)
         for removable in working.select(BIBLEGATEWAY_CONTAINER_REMOVABLE_SELECTOR):
             removable.decompose()
 

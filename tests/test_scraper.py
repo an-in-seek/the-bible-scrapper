@@ -1039,18 +1039,58 @@ def test_parse_verses_from_biblegateway_joins_split_spans_of_a_merged_range() ->
 
 
 def test_parse_verses_from_biblegateway_refuses_ranges_without_a_single_home() -> None:
-    # A range into the next chapter, a backwards range, and a verse printed both
-    # inside a range and on its own: no guess is made, the chapter parses empty.
+    # A range into the next chapter, a backwards range, a verse printed both inside a
+    # range and on its own, a range into another book, and a one-verse "range": no
+    # guess is made, the chapter parses empty.
     cases = [
         '<span class="text Gen-1-30">서른째.</span><span class="text Gen-1-31-Gen-2-1">걸친 범위.</span>',
         '<span class="text Gen-1-6">여섯째.</span><span class="text Gen-1-8-Gen-1-7">거꾸로.</span>',
         '<span class="text Gen-1-6-Gen-1-7">묶음.</span><span class="text Gen-1-7">따로.</span>',
+        '<span class="text Gen-1-6-Exod-1-7">다른 책.</span>',
+        '<span class="text Gen-1-7-Gen-1-7">폭 1.</span>',
     ]
     scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_KLB_ENTRY_URL)
 
     for spans in cases:
         html = f'<div class="passage-text"><div class="version-KLB"><p>{spans}</p></div></div>'
         assert scraper.parse_verses_from_html(html) == [], spans
+
+
+def test_parse_verses_from_biblegateway_keeps_verse_text_wrapped_in_h3() -> None:
+    # KLB wraps a few mid-verse slices in an h3 that starts inside a word (John 8:20).
+    # The slice rejoins its word; the paragraph after it starts a new word.
+    html = """
+    <div class="passage-text"><div class="version-KLB">
+      <h3><span id="ko-KLB-1" class="text John-8-19">소제목</span></h3>
+      <p><span id="ko-KLB-2" class="text John-8-19"><sup class="versenum">19 </sup>앞 절이다.</span></p>
+      <p><span id="ko-KLB-3" class="text John-8-20"><sup class="versenum">20 </sup>성전 헌금</span></p><h3><span class="text John-8-20">함 곁에서 말한</span></h3><p><span class="text John-8-20">이 절이다.</span></p>
+    </div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_KLB_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [(verse.verse_number, verse.text) for verse in verses] == [
+        (19, "앞 절이다."),
+        (20, "성전 헌금함 곁에서 말한 이 절이다."),
+    ]
+
+
+def test_parse_verses_from_biblegateway_drops_heading_after_a_sentence_end_mid_verse() -> None:
+    # ESV Mark 16:9: a real heading sits inside the verse, after the bracketed note.
+    html = """
+    <div class="passage-text"><div class="version-ESV">
+      <p><span class="text Mark-16-8"><sup class="versenum">8 </sup>Verse eight.</span></p>
+      <p><span class="text Mark-16-9">[Some manuscripts end here.]</span></p>
+      <h3><span class="text Mark-16-9">A Heading Inside the Verse</span></h3>
+      <p><span class="text Mark-16-9"><sup class="versenum">9 </sup>Verse nine.</span></p>
+    </div></div>
+    """
+    scraper = HolyBibleScraper(entry_url="https://www.biblegateway.com/passage/?search=Mark%2016&version=ESV")
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.text for verse in verses] == ["Verse eight.", "[Some manuscripts end here.] Verse nine."]
 
 
 def test_biblegateway_page_does_not_fall_through_to_generic_parsers() -> None:
