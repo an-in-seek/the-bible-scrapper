@@ -31,11 +31,12 @@ ENTRY_URL_ENV_BY_TRANSLATION_TYPE = {
     "NIV": "NIV_ENTRY_URL",
     "ESV": "ESV_ENTRY_URL",
     "RNKSV": "RNKSV_ENTRY_URL",
+    "KRV": "KRV_ENTRY_URL",
 }
 # A language code alone does not identify a source: 'en' covers KJV, WEB, ASV, NIV and ESV,
-# 'ko' covers NKRV and RNKSV.
+# 'ko' covers NKRV, RNKSV and KRV.
 TRANSLATION_TYPES_BY_LANGUAGE_CODE = {
-    "ko": ("NKRV", "RNKSV"),
+    "ko": ("NKRV", "RNKSV", "KRV"),
     "en": ("KJV", "WEB", "ASV", "NIV", "ESV"),
     "es": ("RVR1909", "SBLM"),
     "ja": ("JPNMEB", "KOUGO"),
@@ -49,7 +50,7 @@ LEGACY_TRANSLATION_TYPE_BY_ID = {"2": "NKRV"}
 # Tie-break when nothing else narrows it down; keeps the pre-WEB default.
 ENTRY_URL_PREFERENCE_ORDER = (
     "NKRV", "KJV", "WEB", "ASV", "RVR1909", "SBLM", "JPNMEB", "KOUGO", "CUVT", "CUVS",
-    "N1904", "LSG1910", "NIV", "ESV", "RNKSV",
+    "N1904", "LSG1910", "NIV", "ESV", "RNKSV", "KRV",
 )
 # Which source may legitimately produce each translation, and how to recognise the
 # translation when bible_translation.translation_type is empty. Drives the
@@ -163,6 +164,15 @@ TRANSLATION_SOURCE_REQUIREMENTS = {
         "source": "bskorea",
         "version": "SAENEW",
         "name": "새번역",
+        "language_code": "ko",
+    },
+    "KRV": {
+        # 개역한글 (1961), out of copyright. The third bskorea translation: without the
+        # version, NKRV/RNKSV/KRV would pass as each other. The site prints the 1961
+        # spelling (할쌔, 세째), which is the edition's own text.
+        "source": "bskorea",
+        "version": "HAN",
+        "name": "개역한글",
         "language_code": "ko",
     },
 }

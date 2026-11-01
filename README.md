@@ -32,6 +32,7 @@
 - NIV(저작권 역본): [docs/new-international-version-scraping-design.md](docs/new-international-version-scraping-design.md)
 - ESV(저작권 역본): [docs/english-standard-version-scraping-design.md](docs/english-standard-version-scraping-design.md)
 - 새번역 RNKSV(저작권 역본): [docs/revised-new-korean-standard-version-scraping-design.md](docs/revised-new-korean-standard-version-scraping-design.md)
+- 개역한글 KRV: [docs/korean-revised-version-scraping-design.md](docs/korean-revised-version-scraping-design.md)
 
 ## 주요 특징
 
@@ -69,6 +70,7 @@
 - `docs/new-international-version-scraping-design.md`: NIV 설계 문서 (저작권 역본). 적재 결과와 기존 WEB·ASV의 `h4` 오염 발견 기록 포함
 - `docs/english-standard-version-scraping-design.md`: ESV 설계 문서 (저작권 역본). 실측 결과와 권리 사항 포함
 - `docs/revised-new-korean-standard-version-scraping-design.md`: 새번역(RNKSV) 설계 문서 (저작권 역본). 표본 실측, 적재 결과, 개역개정과 공유하는 bskorea 경로의 결함(요나 `jnh`, 시편 표제 래퍼, 병합 절 번호 등)과 그 수정 포함
+- `docs/korean-revised-version-scraping-design.md`: 개역한글(KRV) 설계 문서. 기존 DB 본문과 대한성서공회 개역한글 페이지의 전권 대조 결과와 재적재 계획 포함
 
 ## 요구 사항
 
@@ -127,10 +129,10 @@ CUVS_ENTRY_URL=https://zh.wikisource.org/zh-hans/%E8%81%96%E7%B6%93_(%E5%92%8C%E
 
 `--entry-url`를 지정하지 않으면 기본 URL은 아래 순서로 결정됩니다.
 
-1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JPNMEB` / `KOUGO` / `CUVT` / `CUVS` / `N1904` / `LSG1910` / `NIV` / `ESV` / `RNKSV`)에 해당하는 환경변수
+1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JPNMEB` / `KOUGO` / `CUVT` / `CUVS` / `N1904` / `LSG1910` / `NIV` / `ESV` / `RNKSV` / `KRV`)에 해당하는 환경변수
 2. `BIBLE_TRANSLATION_ID=2` 또는 `BIBLE_TRANSLATION_NAME=개역개정`이면 `NKRV_ENTRY_URL`
 3. `BIBLE_LANGUAGE_CODE`로 좁혀지는 소스가 하나면 그 값
-   - `ko` -> `NKRV_ENTRY_URL` / `RNKSV_ENTRY_URL` 중 설정된 것
+   - `ko` -> `NKRV_ENTRY_URL` / `RNKSV_ENTRY_URL` / `KRV_ENTRY_URL` 중 설정된 것
    - `en` -> `KJV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` / `NIV_ENTRY_URL` / `ESV_ENTRY_URL` 중 설정된 것
    - `es` -> `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` 중 설정된 것
    - `ja` -> `JPNMEB_ENTRY_URL` / `KOUGO_ENTRY_URL` 중 설정된 것
@@ -138,11 +140,11 @@ CUVS_ENTRY_URL=https://zh.wikisource.org/zh-hans/%E8%81%96%E7%B6%93_(%E5%92%8C%E
    - `el` -> `N1904_ENTRY_URL` (본문은 코이네 그리스어지만 DB의 `language_code` CHECK가 `grc`가 아닌 `el`을 허용하므로 `el`로 등록되어 있습니다)
    - `fr` -> `LSG1910_ENTRY_URL`
 4. 설정된 엔트리 URL이 하나뿐이면 그 값
-5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JPNMEB` -> `KOUGO` -> `CUVT` -> `CUVS` -> `N1904` -> `LSG1910` -> `NIV` -> `ESV` -> `RNKSV` 순으로 선택
+5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JPNMEB` -> `KOUGO` -> `CUVT` -> `CUVS` -> `N1904` -> `LSG1910` -> `NIV` -> `ESV` -> `RNKSV` -> `KRV` 순으로 선택
 6. 아무것도 없으면 내장 기본값 `https://thekingsbible.com/Bible/1/1` 사용
 
 주의: `BIBLE_LANGUAGE_CODE`만으로는 소스가 특정되지 않습니다.  
-`ko`(NKRV / RNKSV), `en`(KJV / WEB / ASV / NIV / ESV), `es`(RVR1909 / SBLM), `ja`(JPNMEB / KOUGO), `zh`(CUVT / CUVS) 모두 소스가 둘 이상이라,  
+`ko`(NKRV / RNKSV / KRV), `en`(KJV / WEB / ASV / NIV / ESV), `es`(RVR1909 / SBLM), `ja`(JPNMEB / KOUGO), `zh`(CUVT / CUVS) 모두 소스가 둘 이상이라,  
 해당 엔트리 URL이 여러 개 설정된 상태에서 언어 코드만 주면 실행이 중단됩니다.  
 이때는 `BIBLE_TRANSLATION_TYPE`을 지정하거나 `--entry-url`을 명시해야 합니다.
 
@@ -558,6 +560,19 @@ KJV에 없는 좌표는 요삼 1:15와 계 12:18이고, KJV에만 있는 좌표�
 
 ```env
 RNKSV_ENTRY_URL=https://www.bskorea.or.kr/bible/korbibReadpage.php?version=SAENEW&book=gen&chap=1&sec=1&cVersion=&fontSize=15px&fontWeight=normal
+```
+
+### 15. KRV `bskorea.or.kr`
+
+성경전서 개역한글판(1961, `version=HAN`)은 대한성서공회 표에 따르면 2011-12-31에 저작재산권 보호기간이 끝났습니다. 개역개정·새번역과 같은 소스·같은 파서를 쓰고, 엔트리 URL 해석과 소스/역본 검증에 `KRV`로 등록되어 있습니다.
+
+- 페이지는 1961년 표기(`할쌔`, `사냥군`, `세째`, `십륙`, `가까왔다`, `일찌기`)로 씁니다. 원문 그대로이므로 현행 맞춤법으로 바꾸지 않습니다.
+- DB의 KRV 행(id 1)은 이 도구로 적재한 것이 아닙니다. 2026-10-31 전권 대조에서 개역한글 페이지와 본문이 다른 절이 873개였습니다(본문 대신 메모 12절, 민 1:50–52 절 경계 밀림, 3글자 이상 빠짐 69절 등).
+  사용자 지시로 2026-11-01에 본문을 개역한글 페이지로 바꿨습니다. 앱이 이 DB를 쓰고 있어 지우고 다시 적재하지 않고, 장마다 한 트랜잭션으로 8,718절의 본문만 고쳤습니다. 절 ID와 좌표는 그대로입니다. 근거와 검증은 [설계 문서](docs/korean-revised-version-scraping-design.md) 4·6·7절에 있습니다.
+- 엔트리 URL에 `version=`이 없으면 사이트가 개역개정을 주므로, 그런 URL은 KRV 행에 넣지 않고 중단합니다.
+
+```env
+KRV_ENTRY_URL=https://www.bskorea.or.kr/bible/korbibReadpage.php?version=HAN&book=gen&chap=1&sec=1&cVersion=&fontSize=15px&fontWeight=normal
 ```
 
 ## 네트워크와 재시도
