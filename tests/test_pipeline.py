@@ -874,6 +874,75 @@ def test_resolve_book_code_for_source_maps_jonah_book_key_to_bskorea_code() -> N
     assert resolve_book_code_for_source(scraper, book) == "jnh"
 
 
+BSKOREA_KRV_ENTRY_URL = BSKOREA_NKRV_ENTRY_URL.replace("version=GAE", "version=HAN")
+
+KRV_TRANSLATION_METADATA = {
+    "id": 1,
+    "language_code": "ko",
+    "name": "개역한글",
+    "translation_type": "KRV",
+}
+
+
+def test_validate_source_translation_compatibility_for_bskorea_han() -> None:
+    for metadata in (KRV_TRANSLATION_METADATA, {**KRV_TRANSLATION_METADATA, "translation_type": None}):
+        conn = FakeConn()
+        conn.translation_metadata = dict(metadata)
+
+        validate_source_translation_compatibility(
+            repo=FakeRepo(), conn=conn, scraper=FakeScraper(BSKOREA_KRV_ENTRY_URL)
+        )
+
+
+def test_validate_source_translation_compatibility_separates_krv_from_other_bskorea_versions() -> None:
+    nkrv_metadata = FakeConn().translation_metadata
+    pairs = [
+        (BSKOREA_KRV_ENTRY_URL, nkrv_metadata),
+        (BSKOREA_KRV_ENTRY_URL, RNKSV_TRANSLATION_METADATA),
+        (BSKOREA_NKRV_ENTRY_URL, KRV_TRANSLATION_METADATA),
+        (BSKOREA_RNKSV_ENTRY_URL, KRV_TRANSLATION_METADATA),
+        # No version= fetches GAE, so it must not pass as 개역한글.
+        ("https://www.bskorea.or.kr/bible/korbibReadpage.php?book=gen&chap=1", KRV_TRANSLATION_METADATA),
+    ]
+    for entry_url, metadata in pairs:
+        conn = FakeConn()
+        conn.translation_metadata = dict(metadata)
+        try:
+            validate_source_translation_compatibility(repo=FakeRepo(), conn=conn, scraper=FakeScraper(entry_url))
+        except RuntimeError as exc:
+            assert "Source/translation mismatch" in str(exc)
+        else:
+            raise AssertionError(f"expected RuntimeError for {entry_url} + {metadata['translation_type']}")
+
+
+def test_resolve_default_entry_url_prefers_krv_when_translation_type_is_krv() -> None:
+    with _with_entry_url_env(
+        {
+            "NKRV_ENTRY_URL": BSKOREA_NKRV_ENTRY_URL,
+            "RNKSV_ENTRY_URL": BSKOREA_RNKSV_ENTRY_URL,
+            "KRV_ENTRY_URL": BSKOREA_KRV_ENTRY_URL,
+            "BIBLE_TRANSLATION_TYPE": "KRV",
+        }
+    ):
+        assert resolve_default_entry_url() == BSKOREA_KRV_ENTRY_URL
+
+
+def test_resolve_default_entry_url_rejects_korean_ambiguity_with_krv() -> None:
+    with _with_entry_url_env(
+        {
+            "NKRV_ENTRY_URL": BSKOREA_NKRV_ENTRY_URL,
+            "KRV_ENTRY_URL": BSKOREA_KRV_ENTRY_URL,
+            "BIBLE_LANGUAGE_CODE": "ko",
+        }
+    ):
+        try:
+            resolve_default_entry_url()
+        except ValueError as exc:
+            assert "KRV_ENTRY_URL" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")
+
+
 EBIBLE_RV1909_ENTRY_URL = "https://ebible.org/spaRV1909/GEN01.htm"
 EBIBLE_SBLM_ENTRY_URL = "https://ebible.org/spablm/GEN01.htm"
 EBIBLE_JPNMEB_ENTRY_URL = "https://ebible.org/jpnm/GEN01.htm"
