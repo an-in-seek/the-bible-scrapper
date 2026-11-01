@@ -1769,13 +1769,46 @@ class HolyBibleScraper:
                 string for string in previous.find_all(string=True) if string.find_parent("sup") is None
             ).rstrip()
             if not tail[-1:].isalnum():
-                logger.warning("BibleGateway h3 inside verse %s follows a sentence end; dropped as a heading", token)
+                spilled = self._biblegateway_spilled_chapter_title(heading, token)
+                if spilled:
+                    logger.warning(
+                        "BibleGateway h3 inside verse %s is followed only by a parenthesis at the passage end; "
+                        "dropped with it as the next chapter's heading", token,
+                    )
+                    for span in spilled:
+                        span.decompose()
+                else:
+                    logger.warning("BibleGateway h3 inside verse %s follows a sentence end; dropped as a heading", token)
                 continue
             logger.warning("BibleGateway h3 inside verse %s continues a sentence; kept as verse text", token)
             for span in spans:
                 for child in list(span.contents):
                     previous.append(child.extract())
             heading.decompose()
+
+    def _biblegateway_spilled_chapter_title(self, heading: Tag, token: str) -> list[Tag]:
+        """
+        Return the spans after `heading` when they are the next chapter's title spilled
+        onto this page, else `[]`.
+
+        KLB's Psalm 130 page ends `…(8절 끝).</p></div><h3>(소제목)</h3><p><span
+        class="text Ps-130-8">(131편 표제)</span></p>`: Psalm 131's heading and title,
+        tagged with the last verse here, the title in a `p` where Psalm 131's own page
+        has `h4.psalm-title`. Only that shape qualifies: nothing but this verse follows
+        the heading, and all of it is one parenthesis.
+        """
+        following = heading.find_all_next(
+            lambda node: node.name == "span"
+            and "text" in node.get("class", [])
+            and node.find_parent("h3") is None
+            and node.find_parent("span", class_="text") is None
+        )
+        if not following or any(self._biblegateway_verse_token(span) != token for span in following):
+            return []
+        text = "".join(
+            string for span in following for string in span.find_all(string=True) if string.find_parent("sup") is None
+        ).strip()
+        return following if re.fullmatch(r"\([^()]*\)", text) else []
 
     def _extract_verses_from_biblegateway_passage(self, soup: BeautifulSoup) -> list[Verse]:
         """

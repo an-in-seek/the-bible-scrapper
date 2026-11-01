@@ -1093,6 +1093,53 @@ def test_parse_verses_from_biblegateway_drops_heading_after_a_sentence_end_mid_v
     assert [verse.text for verse in verses] == ["Verse eight.", "[Some manuscripts end here.] Verse nine."]
 
 
+def test_parse_verses_from_biblegateway_drops_next_chapter_title_spilled_after_last_verse(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # KLB's Psalm 130 page ends with Psalm 131's heading and title, both tagged with
+    # verse 8, the title in a `p` rather than `h4.psalm-title`.
+    html = """
+    <div class="passage-text"><div class="version-KLB">
+      <div class="poetry"><p class="line"><span class="text Ps-130-7"><sup class="versenum">7 </sup>앞 절이다.</span><br/><span class="text Ps-130-8"><sup class="versenum">8 </sup>마지막 절의</span><br/><span class="text Ps-130-8">끝 줄이다.</span></p></div>
+      <h3><span class="text Ps-130-8">다음 시편의 소제목</span></h3>
+      <p class="first-line-none"><span class="text Ps-130-8">(다음 시편의 표제)</span></p>
+    </div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_KLB_ENTRY_URL)
+
+    with caplog.at_level("WARNING"):
+        verses = scraper.parse_verses_from_html(html)
+
+    assert [(verse.verse_number, verse.text) for verse in verses] == [(7, "앞 절이다."), (8, "마지막 절의 끝 줄이다.")]
+    assert "dropped with it as the next chapter's heading" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "after_heading",
+    [
+        # More of the verse than one parenthesis: verse text, as in ESV Mark 16:9.
+        '<p><span class="text Ps-130-8">(괄호) 뒤에도 본문이다.</span></p>',
+        # Another verse follows: the heading is not at the passage end.
+        '<p><span class="text Ps-130-8">(괄호)</span><span class="text Ps-130-9"><sup class="versenum">9 </sup>다음 절</span></p>',
+    ],
+)
+def test_parse_verses_from_biblegateway_keeps_text_after_a_mid_verse_heading_unless_a_spilled_title(
+    after_heading: str,
+) -> None:
+    html = f"""
+    <div class="passage-text"><div class="version-KLB">
+      <p><span class="text Ps-130-8"><sup class="versenum">8 </sup>끝 줄이다.</span></p>
+      <h3><span class="text Ps-130-8">소제목</span></h3>
+      {after_heading}
+    </div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_KLB_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert verses[0].text.startswith("끝 줄이다. (괄호)")
+
+
 @pytest.mark.parametrize(
     ("version", "book_heading"),
     [("KLB", "제 1 권"), ("WEB", "BOOK 1"), ("ASV", "Book I")],
