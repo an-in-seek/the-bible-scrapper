@@ -997,6 +997,77 @@ def test_parse_verses_from_biblegateway_uppercases_small_caps() -> None:
     assert verses[1].text == "It read: THE KING OF THE FIXTURE."
 
 
+BIBLEGATEWAY_KLB_ENTRY_URL = "https://www.biblegateway.com/passage/?search=Genesis%201&version=KLB"
+
+
+def test_parse_verses_from_biblegateway_stores_merged_range_at_every_number() -> None:
+    # KLB prints some verses together ("6-7") and names both ends in one class token.
+    html = """
+    <div class="passage-text"><div class="passage-content"><div class="version-KLB">
+      <p><span class="text Gen-1-5" id="ko-KLB-5"><sup class="versenum">5 </sup>다섯째 절이다.</span></p>
+      <p><span class="text Gen-1-6-Gen-1-7" id="ko-KLB-6"><sup class="versenum">6-7 </sup>여섯째와 일곱째 절을 함께 옮겼다.</span></p>
+      <p><span class="text Gen-1-8" id="ko-KLB-7"><sup class="versenum">8 </sup>여덟째 절이다.</span></p>
+    </div></div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_KLB_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [5, 6, 7, 8]
+    assert verses[1].text == verses[2].text == "여섯째와 일곱째 절을 함께 옮겼다."
+
+
+def test_parse_verses_from_biblegateway_joins_split_spans_of_a_merged_range() -> None:
+    html = """
+    <div class="passage-text"><div class="passage-content"><div class="version-KLB">
+      <div class="poetry">
+        <p class="line"><span class="text Ps-23-1-Ps-23-2"><sup class="versenum">1-2 </sup>첫 줄이고</span><br>
+        <span class="text Ps-23-1-Ps-23-2">둘째 줄이다.</span></p>
+        <p class="line"><span class="text Ps-23-3"><sup class="versenum">3 </sup>셋째 절이다.</span></p>
+      </div>
+    </div></div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_KLB_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [(verse.verse_number, verse.text) for verse in verses] == [
+        (1, "첫 줄이고 둘째 줄이다."),
+        (2, "첫 줄이고 둘째 줄이다."),
+        (3, "셋째 절이다."),
+    ]
+
+
+def test_parse_verses_from_biblegateway_refuses_ranges_without_a_single_home() -> None:
+    # A range into the next chapter, a backwards range, and a verse printed both
+    # inside a range and on its own: no guess is made, the chapter parses empty.
+    cases = [
+        '<span class="text Gen-1-30">서른째.</span><span class="text Gen-1-31-Gen-2-1">걸친 범위.</span>',
+        '<span class="text Gen-1-6">여섯째.</span><span class="text Gen-1-8-Gen-1-7">거꾸로.</span>',
+        '<span class="text Gen-1-6-Gen-1-7">묶음.</span><span class="text Gen-1-7">따로.</span>',
+    ]
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_KLB_ENTRY_URL)
+
+    for spans in cases:
+        html = f'<div class="passage-text"><div class="version-KLB"><p>{spans}</p></div></div>'
+        assert scraper.parse_verses_from_html(html) == [], spans
+
+
+def test_biblegateway_page_does_not_fall_through_to_generic_parsers() -> None:
+    # A page the BibleGateway parser cannot read must not be handed to the generic
+    # parsers, which read numbered lines anywhere on the page as verses.
+    html = """
+    <div class="passage-text"><div class="version-KLB">
+      <p><span class="text Gen-1-1-Gen-2-1">걸친 범위.</span></p>
+    </div></div>
+    <ol><li>1 메뉴 항목</li><li>2 다른 항목</li></ol>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_KLB_ENTRY_URL)
+
+    assert scraper.parse_verses_from_html(html) == []
+    assert HolyBibleScraper(entry_url="https://example.com/bible").parse_verses_from_html(html) != []
+
+
 EBIBLE_ENTRY_URL = "https://ebible.org/spaRV1909/GEN01.htm"
 
 EBIBLE_CHAPTER_HTML = """

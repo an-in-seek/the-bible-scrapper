@@ -103,7 +103,11 @@ BIBLEGATEWAY_BOOK_NAMES: tuple[str, ...] = (
 BIBLEGATEWAY_CRAWL_DELAY_SECONDS = 15.0
 # Verse spans carry an "OSIS-chapter-verse" class token, e.g. "Gen-1-1", "1Sam-1-23".
 # The book abbreviation differs from the search name, so only the numbers are used.
-BIBLEGATEWAY_VERSE_CLASS_PATTERN = re.compile(r"^[A-Za-z0-9]+-(\d{1,3})-(\d{1,3})$")
+# A paraphrase that prints verses together (KLB "6-7") names both ends in one token,
+# "Gen-1-6-Gen-1-7"; the single-verse pattern alone skipped those spans and lost the text.
+BIBLEGATEWAY_VERSE_CLASS_PATTERN = re.compile(
+    r"^([A-Za-z0-9]+)-(\d{1,3})-(\d{1,3})(?:-([A-Za-z0-9]+)-(\d{1,3})-(\d{1,3}))?$"
+)
 # Dropped from the container before verse extraction. Every `h4` goes, not just
 # `h4.psalm-title`: headings carry the class of the verse they precede, so the parser
 # folds them into that verse. WEB/ASV use `h4.psalm-title` for superscriptions, NIV a
@@ -1252,9 +1256,10 @@ class HolyBibleScraper:
             return bskorea_verses
 
         # Must run before the generic parsers: they would read BibleGateway
-        # footnotes and navigation labels as verses.
+        # footnotes and navigation labels as verses. For the same reason a BibleGateway
+        # page stops here when nothing parsed, so a refused verse range skips the chapter.
         biblegateway_verses = self._extract_verses_from_biblegateway_passage(soup)
-        if biblegateway_verses:
+        if biblegateway_verses or self._is_biblegateway_source():
             return biblegateway_verses
 
         # Must also precede the generic parsers: the regex fallback happily parses an
@@ -1737,7 +1742,7 @@ class HolyBibleScraper:
         for removable in working.select(BIBLEGATEWAY_CONTAINER_REMOVABLE_SELECTOR):
             removable.decompose()
 
-        fragments: list[tuple[int, int, str, bool]] = []
+        fragments: list[tuple[int, int, int, str, bool]] = []
         for node in working.select("span.text"):
             if node.find_parent("span", class_="text") is not None:
                 continue
@@ -1749,6 +1754,14 @@ class HolyBibleScraper:
                     break
             if token is None:
                 continue
+            chapter, first = int(token.group(2)), int(token.group(3))
+            last = first
+            if token.group(4) is not None:
+                last = int(token.group(6))
+                # Only a forward range within one chapter has an unambiguous home.
+                if token.group(4) != token.group(1) or int(token.group(5)) != chapter or last <= first:
+                    logger.warning("BibleGateway verse range %r not understood; chapter skipped", token.group(0))
+                    return []
 
             has_footnote = node.select_one("sup.footnote") is not None
             fragment = BeautifulSoup(str(node), "html.parser")
@@ -1774,20 +1787,30 @@ class HolyBibleScraper:
                 text = BIBLEGATEWAY_OMITTED_VERSE_TEXT
                 is_omitted = True
 
-            fragments.append((int(token.group(1)), int(token.group(2)), text, is_omitted))
+            fragments.append((chapter, first, last, text, is_omitted))
 
         if not fragments:
             return []
 
-        dominant_chapter = Counter(chapter for chapter, _, _, _ in fragments).most_common(1)[0][0]
+        dominant_chapter = Counter(chapter for chapter, _, _, _, _ in fragments).most_common(1)[0][0]
 
         # A single verse is split across several spans in poetry blocks
         # (Psalms 23:4 spans four), so fragments are joined, not deduplicated.
+        # A merged range is one printed unit: it is stored at every number it covers,
+        # like bskorea's "18-19", so numbering stays contiguous.
         merged: dict[int, list[tuple[str, bool]]] = {}
-        for chapter, verse_number, text, is_omitted in fragments:
+        covered_by: dict[int, tuple[int, int]] = {}
+        for chapter, first, last, text, is_omitted in fragments:
             if chapter != dominant_chapter:
                 continue
-            merged.setdefault(verse_number, []).append((text, is_omitted))
+            for verse_number in range(first, last + 1):
+                if covered_by.setdefault(verse_number, (first, last)) != (first, last):
+                    logger.warning(
+                        "BibleGateway verse %s is printed in two units (%s-%s and %s-%s); chapter skipped",
+                        verse_number, *covered_by[verse_number], first, last,
+                    )
+                    return []
+                merged.setdefault(verse_number, []).append((text, is_omitted))
 
         verses: list[Verse] = []
         for verse_number, parts in sorted(merged.items()):
