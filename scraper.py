@@ -54,6 +54,36 @@ USFM_BOOK_CODES: tuple[str, ...] = (
     "eph", "php", "col", "1th", "2th", "1ti", "2ti", "tit", "phm", "heb", "jas", "1pe",
     "2pe", "1jn", "2jn", "3jn", "jud", "rev",
 )
+# bskorea follows USFM except for Jonah, which every version there calls "jnh"
+# (bible/js/bible.list.js, checked 2026-10-29). book=jon answers 200 with an empty
+# reading page, and the generic parsers used to read that as a one-verse chapter.
+BSKOREA_BOOK_CODE_OVERRIDES = {"jon": "jnh"}
+# Dropped from the reading page before verses are read. `font.smallTitle` is a section
+# heading; most sit between verses, but where a paragraph starts mid-verse the heading
+# (with its parallel-passage links) sits inside the verse span: 2 Samuel 19:8, Acts 8:1.
+BSKOREA_REMOVABLE_SELECTOR = "a.comment, div.D2, font.smallTitle"
+# A verse number, or a merged range: GAE prints "18-19" (Deuteronomy 6) and "1-3"
+# (Psalm 92), and reading only the first number cost NKRV 13 verses.
+BSKOREA_VERSE_NUMBER_PATTERN = re.compile(r"^(\d{1,3})(?:-(\d{1,3}))?$")
+# 새번역 (SAENEW) prints no span for a verse critical texts omit. It appends a marker to
+# the previous verse instead: "(21절 없음)", and once "(6절 하반부터 8절 상반까지 없음)"
+# (Acts 24, where only verse 7 is omitted whole).
+BSKOREA_OMITTED_MARKER_PATTERN = re.compile(
+    r"\s*\((\d{1,3})절(?: 하반부터 (\d{1,3})절 상반까지)? 없음\)$"
+)
+# An empty <font size='1'> is some pages' only paragraph break: a space when the text
+# before it ends a sentence and the text after it starts with Hangul (optionally after
+# an opening quote), dropped everywhere else.
+BSKOREA_SENTENCE_END_PATTERN = re.compile(r"[.?!][\"'”’]?$")
+BSKOREA_PARAGRAPH_START_PATTERN = re.compile(r"[\"'“‘]?[가-힣]")
+# Stored for the verses such a marker names. GAE prints the same text in the omitted
+# verse's own span, so NKRV already holds it at the same 14 coordinates.
+BSKOREA_OMITTED_VERSE_TEXT = "(없음)"
+# 새번역 marks Song of Songs speakers in plain text, mostly at the end of the verse
+# before the speech they introduce, so kept they would label the wrong verse.
+# Removed like BibleGateway's h4.speaker.
+BSKOREA_SONG_SPEAKER_LABEL_PATTERN = re.compile(r"\((?:여자|남자|친구들)\)")
+SONG_OF_SONGS_BOOK_ORDER = 22
 # Book names accepted by the BibleGateway `search` query parameter.
 BIBLEGATEWAY_BOOK_NAMES: tuple[str, ...] = (
     "Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Joshua", "Judges",
@@ -323,6 +353,8 @@ class HolyBibleScraper:
             return self._get_wikisource_variant()
         if self._is_studybible_source():
             return self._get_studybible_version()
+        if self._is_bskorea_source():
+            return self._get_bskorea_version()
         query = dict(parse_qsl(urlparse(self.entry_url or "").query, keep_blank_values=True))
         return query.get("version")
 
@@ -757,10 +789,26 @@ class HolyBibleScraper:
         return f"{DEFAULT_THEKINGSBIBLE_KJV_BASE_URL}/{book_order}/{chapter_number}"
 
     @staticmethod
+    def _to_bskorea_book_code(code: str) -> str:
+        """USFM code to the one bskorea uses; only Jonah differs ("jon" -> "jnh")."""
+        return BSKOREA_BOOK_CODE_OVERRIDES.get(code, code)
+
+    @staticmethod
     def _get_bskorea_book_code(book_order: int) -> str | None:
         if 1 <= book_order <= len(USFM_BOOK_CODES):
-            return USFM_BOOK_CODES[book_order - 1]
+            return HolyBibleScraper._to_bskorea_book_code(USFM_BOOK_CODES[book_order - 1])
         return None
+
+    def _get_bskorea_version(self) -> str:
+        """
+        Version this entry URL fetches: the `version` parameter, or GAE when absent.
+
+        Must agree with _build_bskorea_url(). Reporting None for a URL without
+        `version=` let the compatibility check pass it for any bskorea translation
+        while every request fetched GAE (개역개정).
+        """
+        parsed = urlparse(self.entry_url or DEFAULT_BSKOREA_NKRV_ENTRY_URL)
+        return dict(parse_qsl(parsed.query, keep_blank_values=True)).get("version", "GAE")
 
     def _build_bskorea_url(
         self,
@@ -771,6 +819,7 @@ class HolyBibleScraper:
         book_code = (book_code or self._get_bskorea_book_code(book_order))
         if book_code is None:
             raise ValueError(f"Invalid bskorea book order: {book_order}")
+        book_code = self._to_bskorea_book_code(book_code)
 
         parsed = urlparse(self.entry_url or DEFAULT_BSKOREA_NKRV_ENTRY_URL)
         path = parsed.path or "/bible/korbibReadpage.php"
@@ -778,7 +827,7 @@ class HolyBibleScraper:
 
         entry_params = dict(parse_qsl(parsed.query, keep_blank_values=True))
         query_params = {
-            "version": entry_params.get("version", "GAE"),
+            "version": self._get_bskorea_version(),
             "book": book_code,
             "chap": str(chapter_number),
             "sec": "1",
@@ -1178,7 +1227,12 @@ class HolyBibleScraper:
 
         url = chapter_url or self._build_chapter_url(book_order, chapter_number, book_code=book_code)
         soup = self._fetch_soup(url)
-        verses = self._sanitize_verses(self._extract_verses(soup))
+        verses = self._extract_verses(soup)
+        # Done here rather than in the parser, which never learns the book. The loader,
+        # the smoke test and the drift check all come through this method.
+        if self._is_bskorea_source() and book_order == SONG_OF_SONGS_BOOK_ORDER:
+            verses = self._strip_bskorea_song_speaker_labels(verses)
+        verses = self._sanitize_verses(verses)
 
         payload = ChapterPayload(
             book_order=book_order,
@@ -1191,7 +1245,10 @@ class HolyBibleScraper:
 
     def _extract_verses(self, soup: BeautifulSoup) -> list[Verse]:
         bskorea_verses = self._extract_verses_from_bskorea_read_page(soup)
-        if bskorea_verses:
+        # A bskorea page stops here even when nothing parsed. The generic parsers read
+        # its empty reading page (book=jon) as a one-verse chapter and a psalm under an
+        # unclosed <H> as verses with footnotes in them; both pass every loader guard.
+        if bskorea_verses or self._is_bskorea_source():
             return bskorea_verses
 
         # Must run before the generic parsers: they would read BibleGateway
@@ -1510,42 +1567,154 @@ class HolyBibleScraper:
             return candidates[0]
         return None
 
+    def _strip_bskorea_song_speaker_labels(self, verses: list[Verse]) -> list[Verse]:
+        stripped = [
+            Verse(
+                verse_number=verse.verse_number,
+                text=self._normalize_text(BSKOREA_SONG_SPEAKER_LABEL_PATTERN.sub(" ", verse.text)),
+            )
+            for verse in verses
+        ]
+        emptied = [verse.verse_number for verse in stripped if not verse.text]
+        if emptied:
+            # This runs after the parser's gap check, so a verse that was only a label
+            # would be dropped as empty and leave a gap nothing reports.
+            logger.warning(
+                "bskorea Song of Songs verses %s hold only a speaker label; chapter skipped", emptied
+            )
+            return []
+        return stripped
+
+    @staticmethod
+    def _bskorea_text_beside(elements: Iterable[PageElement], *, preceding: bool, length: int = 2) -> str:
+        """
+        The `length` characters nearest a node, read outward through `elements`.
+
+        Read across text nodes: a quote is often a node of its own ('"' then a
+        `font.name`), and the first node alone would hide the letter after it.
+        """
+        text = ""
+        for element in elements:
+            if isinstance(element, NavigableString):
+                text = element + text if preceding else text + element
+                if len(text) >= length:
+                    break
+        return text[-length:] if preceding else text[:length]
+
+    @staticmethod
+    def _is_bskorea_verse_span(tag: Tag) -> bool:
+        return tag.name == "span" and tag.find("span", class_="number", recursive=False) is not None
+
     def _extract_verses_from_bskorea_read_page(self, soup: BeautifulSoup) -> list[Verse]:
+        """
+        Parse a bskorea reading page: one `<span>` per verse, its number in `span.number`.
+
+        Verse spans are searched at any depth: 새번역 opens a titled psalm with an
+        unclosed `<H VAL=1.1>`, and html.parser nests the whole chapter inside it. The
+        title itself is in no verse span, so it drops out like every other edition's.
+
+        Returns [] rather than guessing when the page does not add up: a verse number
+        that is not N or N-M, an unknown "…없음)" marker, a gap no marker explains, or a
+        marker naming a verse that has its own span.
+        """
         container = self._get_bskorea_content_root(soup)
         if container is None:
             return []
 
+        working = BeautifulSoup(str(container), "html.parser")
+        for removable in working.select(BSKOREA_REMOVABLE_SELECTOR):
+            removable.decompose()
+        for hidden in working.find_all(style=True):
+            # A styled node inside a hidden one was destroyed with it; reading its
+            # attributes would raise.
+            if hidden.decomposed:
+                continue
+            style = hidden.get("style", "")
+            if isinstance(style, str) and "display:none" in style.lower().replace(" ", ""):
+                hidden.decompose()
+        # A paragraph break inside a verse is a bare <br> between two sentences, which
+        # get_text("") would glue together. A <br> never falls inside a word, so a space
+        # here cannot split a particle off its noun.
+        for line_break in working.find_all("br"):
+            line_break.replace_with(" ")
+        # Some paragraph breaks have no <br>, only an empty <font size='1'> (22 verses in
+        # 새번역, e.g. Ezra 6:3). Decided here, before verse numbers are read, so a mark
+        # inside a number span is simply dropped. Only a mark between a sentence end and
+        # Hangul becomes a space, which can never split a word.
+        for paragraph_mark in working.find_all("font", attrs={"size": "1"}):
+            if paragraph_mark.get_text():
+                continue
+            before = self._bskorea_text_beside(paragraph_mark.previous_elements, preceding=True)
+            after = self._bskorea_text_beside(paragraph_mark.next_elements, preceding=False)
+            if BSKOREA_SENTENCE_END_PATTERN.search(before) and BSKOREA_PARAGRAPH_START_PATTERN.match(after):
+                paragraph_mark.replace_with(" ")
+            else:
+                paragraph_mark.decompose()
+
+        # Collected before any number span is removed: removing it is what would stop an
+        # outer verse span from being recognised as one.
+        verse_nodes = [
+            node
+            for node in working.find_all(self._is_bskorea_verse_span)
+            if node.find_parent(self._is_bskorea_verse_span) is None
+        ]
+
         verses: list[Verse] = []
-        for verse_node in container.find_all("span", recursive=False):
-            number_node = verse_node.find("span", class_="number")
-            if number_node is None:
-                continue
-
-            number_match = re.search(r"(\d{1,3})", number_node.get_text(" ", strip=True))
-            if not number_match:
-                continue
-            verse_number = int(number_match.group(1))
-
-            verse_clone_soup = BeautifulSoup(str(verse_node), "html.parser")
-            verse_clone = verse_clone_soup.find("span")
-            if verse_clone is None:
-                continue
-
-            for removable in verse_clone.select("span.number, a.comment, div.D2"):
-                removable.decompose()
-
-            for hidden in verse_clone.find_all(style=True):
-                style = hidden.get("style", "")
-                if isinstance(style, str) and "display:none" in style.lower().replace(" ", ""):
-                    hidden.decompose()
+        omitted: set[int] = set()
+        for verse_node in verse_nodes:
+            number_node = verse_node.find("span", class_="number", recursive=False)
+            number_text = number_node.get_text("").replace("\xa0", " ").strip()
+            number_match = BSKOREA_VERSE_NUMBER_PATTERN.match(number_text)
+            if number_match is None or int(number_match.group(2) or 0) > MAX_VERSE_NUMBER:
+                logger.warning("bskorea verse number %r not understood; chapter skipped", number_text)
+                return []
+            first = int(number_match.group(1))
+            last = int(number_match.group(2) or first)
+            if last < first:
+                logger.warning("bskorea verse range %r runs backwards; chapter skipped", number_text)
+                return []
+            number_node.decompose()
 
             # Preserve source whitespace between inline nodes so Korean particles
             # like "모세가" are not split into "모세 가" by an artificial separator.
-            verse_text = self._normalize_text(verse_clone.get_text("", strip=False))
+            verse_text = self._normalize_text(verse_node.get_text("", strip=False))
+            marker = BSKOREA_OMITTED_MARKER_PATTERN.search(verse_text)
+            if marker is not None:
+                start = int(marker.group(1))
+                if marker.group(2) is None:
+                    omitted.add(start)
+                else:
+                    # "A절 하반부터 B절 상반까지": A and B keep their halves.
+                    omitted.update(range(start + 1, int(marker.group(2))))
+                verse_text = verse_text[: marker.start()].rstrip()
+            elif verse_text.endswith("없음)") and verse_text != BSKOREA_OMITTED_VERSE_TEXT:
+                logger.warning("bskorea omission marker not understood at verse %s; chapter skipped", first)
+                return []
             if not verse_text:
                 continue
 
-            verses.append(Verse(verse_number=verse_number, text=verse_text))
+            # A merged range is one printed unit: store it at every number it covers so
+            # verse numbering stays contiguous and any number returns the right text.
+            for verse_number in range(first, last + 1):
+                verses.append(Verse(verse_number=verse_number, text=verse_text))
+
+        numbers = {verse.verse_number for verse in verses}
+        if omitted & numbers:
+            logger.warning(
+                "bskorea omission marker names verses that have their own span %s; chapter skipped",
+                sorted(omitted & numbers),
+            )
+            return []
+        if numbers:
+            unexplained = set(range(1, max(numbers) + 1)) - numbers - omitted
+            if unexplained:
+                logger.warning(
+                    "bskorea chapter has verse gaps no omission marker explains %s; chapter skipped",
+                    sorted(unexplained),
+                )
+                return []
+            for verse_number in omitted:
+                verses.append(Verse(verse_number=verse_number, text=BSKOREA_OMITTED_VERSE_TEXT))
 
         verses.sort(key=lambda verse: verse.verse_number)
         return verses

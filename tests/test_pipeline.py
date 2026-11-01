@@ -74,6 +74,8 @@ class FakeScraper:
     _get_wikisource_variant = HolyBibleScraper._get_wikisource_variant
     _is_studybible_source = HolyBibleScraper._is_studybible_source
     _get_studybible_version = HolyBibleScraper._get_studybible_version
+    _is_bskorea_source = HolyBibleScraper._is_bskorea_source
+    _get_bskorea_version = HolyBibleScraper._get_bskorea_version
 
     def __init__(self, entry_url: str) -> None:
         self.entry_url = entry_url
@@ -768,6 +770,108 @@ def test_resolve_default_entry_url_rejects_english_ambiguity_with_esv() -> None:
             assert "Ambiguous entry URL" in str(exc)
         else:
             raise AssertionError("expected ValueError")
+
+
+BSKOREA_NKRV_ENTRY_URL = (
+    "https://www.bskorea.or.kr/bible/korbibReadpage.php"
+    "?version=GAE&book=gen&chap=1&sec=1&cVersion=&fontSize=15px&fontWeight=normal"
+)
+BSKOREA_RNKSV_ENTRY_URL = (
+    "https://www.bskorea.or.kr/bible/korbibReadpage.php"
+    "?version=SAENEW&book=gen&chap=1&sec=1&cVersion=&fontSize=15px&fontWeight=normal"
+)
+
+RNKSV_TRANSLATION_METADATA = {
+    "id": 3,
+    "language_code": "ko",
+    "name": "새번역",
+    "translation_type": "RNKSV",
+}
+
+
+def test_validate_source_translation_compatibility_for_bskorea_saenew() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = dict(RNKSV_TRANSLATION_METADATA)
+
+    validate_source_translation_compatibility(
+        repo=repo, conn=conn, scraper=FakeScraper(BSKOREA_RNKSV_ENTRY_URL)
+    )
+
+
+def test_validate_source_translation_compatibility_recognises_rnksv_by_identity() -> None:
+    repo = FakeRepo()
+    conn = FakeConn()
+    conn.translation_metadata = {**RNKSV_TRANSLATION_METADATA, "translation_type": None}
+
+    validate_source_translation_compatibility(
+        repo=repo, conn=conn, scraper=FakeScraper(BSKOREA_RNKSV_ENTRY_URL)
+    )
+
+
+def test_validate_source_translation_compatibility_separates_rnksv_from_nkrv() -> None:
+    nkrv_metadata = FakeConn().translation_metadata
+    pairs = [
+        (BSKOREA_RNKSV_ENTRY_URL, nkrv_metadata),
+        (BSKOREA_NKRV_ENTRY_URL, RNKSV_TRANSLATION_METADATA),
+        # SAE is 표준새번역 (1993), the edition 새번역 revised.
+        (BSKOREA_RNKSV_ENTRY_URL.replace("SAENEW", "SAE"), RNKSV_TRANSLATION_METADATA),
+        # No version= fetches GAE, so it must not pass as 새번역.
+        ("https://www.bskorea.or.kr/bible/korbibReadpage.php?book=gen&chap=1", RNKSV_TRANSLATION_METADATA),
+    ]
+    for entry_url, metadata in pairs:
+        repo = FakeRepo()
+        conn = FakeConn()
+        conn.translation_metadata = dict(metadata)
+        try:
+            validate_source_translation_compatibility(repo=repo, conn=conn, scraper=FakeScraper(entry_url))
+        except RuntimeError as exc:
+            assert "Source/translation mismatch" in str(exc)
+        else:
+            raise AssertionError(f"expected RuntimeError for {entry_url} + {metadata['translation_type']}")
+
+
+def test_validate_source_translation_compatibility_allows_versionless_bskorea_url_for_nkrv() -> None:
+    validate_source_translation_compatibility(
+        repo=FakeRepo(),
+        conn=FakeConn(),
+        scraper=FakeScraper("https://www.bskorea.or.kr/bible/korbibReadpage.php?book=gen&chap=1"),
+    )
+
+
+def test_resolve_default_entry_url_prefers_rnksv_when_translation_type_is_rnksv() -> None:
+    with _with_entry_url_env(
+        {
+            "NKRV_ENTRY_URL": BSKOREA_NKRV_ENTRY_URL,
+            "RNKSV_ENTRY_URL": BSKOREA_RNKSV_ENTRY_URL,
+            "BIBLE_TRANSLATION_TYPE": "RNKSV",
+        }
+    ):
+        assert resolve_default_entry_url() == BSKOREA_RNKSV_ENTRY_URL
+
+
+def test_resolve_default_entry_url_rejects_korean_ambiguity() -> None:
+    with _with_entry_url_env(
+        {
+            "NKRV_ENTRY_URL": BSKOREA_NKRV_ENTRY_URL,
+            "RNKSV_ENTRY_URL": BSKOREA_RNKSV_ENTRY_URL,
+            "BIBLE_LANGUAGE_CODE": "ko",
+        }
+    ):
+        try:
+            resolve_default_entry_url()
+        except ValueError as exc:
+            assert "Ambiguous entry URL" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")
+
+
+def test_resolve_book_code_for_source_maps_jonah_book_key_to_bskorea_code() -> None:
+    scraper = FakeScraper(BSKOREA_RNKSV_ENTRY_URL)
+    book = Book(id=1076, book_order=32, book_key="JON", abbreviation="욘", name="요나")
+
+    # bskorea answers book=jon with an empty page; it calls Jonah "jnh".
+    assert resolve_book_code_for_source(scraper, book) == "jnh"
 
 
 EBIBLE_RV1909_ENTRY_URL = "https://ebible.org/spaRV1909/GEN01.htm"

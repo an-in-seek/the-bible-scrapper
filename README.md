@@ -31,6 +31,7 @@
 - LSG1910(프랑스어; Ostervald · Martin은 보류): [docs/french-public-domain-scraping-design.md](docs/french-public-domain-scraping-design.md)
 - NIV(저작권 역본): [docs/new-international-version-scraping-design.md](docs/new-international-version-scraping-design.md)
 - ESV(저작권 역본): [docs/english-standard-version-scraping-design.md](docs/english-standard-version-scraping-design.md)
+- 새번역 RNKSV(저작권 역본): [docs/revised-new-korean-standard-version-scraping-design.md](docs/revised-new-korean-standard-version-scraping-design.md)
 
 ## 주요 특징
 
@@ -67,6 +68,7 @@
 - `docs/french-public-domain-scraping-design.md`: LSG1910(프랑스어 Louis Segond 1910) 설계 문서. Ostervald·Martin 보류 근거 포함
 - `docs/new-international-version-scraping-design.md`: NIV 설계 문서 (저작권 역본). 적재 결과와 기존 WEB·ASV의 `h4` 오염 발견 기록 포함
 - `docs/english-standard-version-scraping-design.md`: ESV 설계 문서 (저작권 역본). 실측 결과와 권리 사항 포함
+- `docs/revised-new-korean-standard-version-scraping-design.md`: 새번역(RNKSV) 설계 문서 (저작권 역본). 표본 실측, 적재 결과, 개역개정과 공유하는 bskorea 경로의 결함(요나 `jnh`, 시편 표제 래퍼, 병합 절 번호 등)과 그 수정 포함
 
 ## 요구 사항
 
@@ -125,10 +127,10 @@ CUVS_ENTRY_URL=https://zh.wikisource.org/zh-hans/%E8%81%96%E7%B6%93_(%E5%92%8C%E
 
 `--entry-url`를 지정하지 않으면 기본 URL은 아래 순서로 결정됩니다.
 
-1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JPNMEB` / `KOUGO` / `CUVT` / `CUVS` / `N1904` / `LSG1910` / `NIV` / `ESV`)에 해당하는 환경변수
+1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JPNMEB` / `KOUGO` / `CUVT` / `CUVS` / `N1904` / `LSG1910` / `NIV` / `ESV` / `RNKSV`)에 해당하는 환경변수
 2. `BIBLE_TRANSLATION_ID=2` 또는 `BIBLE_TRANSLATION_NAME=개역개정`이면 `NKRV_ENTRY_URL`
 3. `BIBLE_LANGUAGE_CODE`로 좁혀지는 소스가 하나면 그 값
-   - `ko` -> `NKRV_ENTRY_URL`
+   - `ko` -> `NKRV_ENTRY_URL` / `RNKSV_ENTRY_URL` 중 설정된 것
    - `en` -> `KJV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` / `NIV_ENTRY_URL` / `ESV_ENTRY_URL` 중 설정된 것
    - `es` -> `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` 중 설정된 것
    - `ja` -> `JPNMEB_ENTRY_URL` / `KOUGO_ENTRY_URL` 중 설정된 것
@@ -136,11 +138,11 @@ CUVS_ENTRY_URL=https://zh.wikisource.org/zh-hans/%E8%81%96%E7%B6%93_(%E5%92%8C%E
    - `el` -> `N1904_ENTRY_URL` (본문은 코이네 그리스어지만 DB의 `language_code` CHECK가 `grc`가 아닌 `el`을 허용하므로 `el`로 등록되어 있습니다)
    - `fr` -> `LSG1910_ENTRY_URL`
 4. 설정된 엔트리 URL이 하나뿐이면 그 값
-5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JPNMEB` -> `KOUGO` -> `CUVT` -> `CUVS` -> `N1904` -> `LSG1910` -> `NIV` -> `ESV` 순으로 선택
+5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JPNMEB` -> `KOUGO` -> `CUVT` -> `CUVS` -> `N1904` -> `LSG1910` -> `NIV` -> `ESV` -> `RNKSV` 순으로 선택
 6. 아무것도 없으면 내장 기본값 `https://thekingsbible.com/Bible/1/1` 사용
 
 주의: `BIBLE_LANGUAGE_CODE`만으로는 소스가 특정되지 않습니다.  
-`en`(KJV / WEB / ASV / NIV / ESV), `es`(RVR1909 / SBLM), `ja`(JPNMEB / KOUGO), `zh`(CUVT / CUVS) 모두 소스가 둘 이상이라,  
+`ko`(NKRV / RNKSV), `en`(KJV / WEB / ASV / NIV / ESV), `es`(RVR1909 / SBLM), `ja`(JPNMEB / KOUGO), `zh`(CUVT / CUVS) 모두 소스가 둘 이상이라,  
 해당 엔트리 URL이 여러 개 설정된 상태에서 언어 코드만 주면 실행이 중단됩니다.  
 이때는 `BIBLE_TRANSLATION_TYPE`을 지정하거나 `--entry-url`을 명시해야 합니다.
 
@@ -259,7 +261,10 @@ DB 조회는 장마다 읽기 전용 트랜잭션으로 끝내고 페이지를 �
 
 - `korbibReadpage.php` URL을 기준으로 chapter URL을 생성합니다.
 - book 코드는 `bible_book.book_key`가 있으면 우선 사용하고, 없으면 코드 내 canonical code를 사용합니다.
+  단 요나는 이 사이트가 `jnh`를 쓰므로 `JON`도 `jnh`로 바꿉니다(`book=jon`은 본문 없는 페이지입니다).
 - 장 수는 KJV와 동일한 정경 66권 chapter count를 사용합니다.
+- 절 번호가 `18-19`처럼 묶여 있으면 묶인 모든 번호에 같은 본문을 저장합니다. 이 처리가 없던 때 적재한 NKRV에는 이런 13개 좌표(신 6:19 등)가 빠져 있습니다. 13개 모두 현재 페이지에서 묶인 번호 안에 있는 것을 확인했습니다(2026-10-30). 해당 장을 다시 돌리면 빠진 절만 채워지지만, DB 쓰기이므로 따로 결정합니다.
+- 절 번호가 맞지 않는 장(설명 없는 구멍, 모르는 형식의 번호나 생략 표지)은 추측하지 않고 0절로 건너뜁니다. 대한성서공회 페이지는 범용 파서로 넘기지 않습니다.
 
 권장 엔트리 URL:
 
@@ -536,6 +541,23 @@ English Standard Version(ESV Text Edition: 2025)도 **저작권 역본**입니�
 
 ```env
 ESV_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=ESV
+```
+
+### 14. RNKSV `bskorea.or.kr`
+
+성경전서 새번역(2001, `version=SAENEW`)도 **저작권 역본**입니다(대한성서공회). 개역개정과 같은 소스·같은 파서를 쓰며, 엔트리 URL 해석과 소스/역본 검증에 `RNKSV`로 등록되어 있습니다. 같은 사이트의 `SAE`(표준새번역 1993)는 별개 판본이라 거부합니다.
+사용자가 권리 사항을 전달받은 뒤, 상용 배포 없이 개인 열람용 DB로 보관한다는 판단으로 적재를 지시했습니다. 결과는 66권 / 1,189장 / **31,102절**입니다(2026-10-30–31, 3~6초 간격으로 약 1시간 35분).
+KJV에 없는 좌표는 요삼 1:15와 계 12:18이고, KJV에만 있는 좌표는 고후 13:14와 겔 15:8입니다. 겔 15:8은 페이지가 7절까지만 번호를 달고 8절 내용을 7절에 이어 둔 경우입니다. 근거와 검증은 [설계 문서](docs/revised-new-korean-standard-version-scraping-design.md) 2절과 16절에 있습니다. **이 DB는 자유롭게 배포할 수 없습니다.**
+
+- 새번역은 생략한 절(마 17:21 등 표본 14곳)에 스팬을 만들지 않고 앞 절 끝에 `(21절 없음)` 같은 표지를 붙입니다. 파서는 표지를 떼어 내고, 가리킨 절을 `(없음)` 행으로 저장합니다. 개역개정 페이지가 생략 절의 자기 스팬에 싣는 `(없음)`과 같은 값입니다. 다만 DB의 NKRV는 같은 14곳 중 행 8:37이 `없음`, 24:7이 `（없음）`(전각 괄호)이라 이 두 곳만 글자가 다릅니다.
+- 표제가 있는 시편은 닫히지 않은 `<H VAL=1.1>` 안에 절이 들어 있어 절을 깊이와 상관없이 찾습니다. 표제는 저장하지 않습니다.
+- 절 중간의 소제목(`font.smallTitle`)과 평행 본문 참조는 지우고, 절 안 줄바꿈(`<br>`)은 공백 하나로 읽습니다.
+  `<br>` 없이 빈 `<font size='1'>`만으로 문단을 나눈 곳(22절)은 앞이 문장 끝 부호이고 뒤가 한글(여는 따옴표 뒤 포함)일 때만 공백으로 읽고, 다른 자리에서는 지웁니다.
+- 아가의 화자 표기 `(여자)`·`(남자)`·`(친구들)`은 일반 텍스트라 아가(22권)에서만 지웁니다.
+- 엔트리 URL에 `version=`이 없으면 사이트가 개역개정을 주므로, 그런 URL은 RNKSV 행에 넣지 않고 중단합니다.
+
+```env
+RNKSV_ENTRY_URL=https://www.bskorea.or.kr/bible/korbibReadpage.php?version=SAENEW&book=gen&chap=1&sec=1&cVersion=&fontSize=15px&fontWeight=normal
 ```
 
 ## 네트워크와 재시도
