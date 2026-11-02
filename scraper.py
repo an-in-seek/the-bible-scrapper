@@ -125,6 +125,9 @@ BIBLEGATEWAY_CONTAINER_REMOVABLE_SELECTOR = (
 # The only `h2` seen in a passage. Any other is still dropped, with a warning, since
 # that rule rests on these five places alone.
 BIBLEGATEWAY_PSALTER_BOOK_HEADING_TOKENS = frozenset(f"Ps-{psalm}-1" for psalm in (1, 42, 73, 90, 107))
+# Verses whose text an `h3` cuts at a word boundary rather than inside a word. The markup
+# is the same either way (`</p><h3>`), so each was read on its page before being listed.
+BIBLEGATEWAY_SPACED_HEADING_TEXT_TOKENS = frozenset({"Matt-9-17"})
 # Dropped from each verse span. Kept separate from the container pass so a span can
 # still be inspected for the footnote marker that flags an untranslated verse.
 BIBLEGATEWAY_INLINE_REMOVABLE_SELECTOR = (
@@ -1746,7 +1749,10 @@ class HolyBibleScraper:
         (John 8:20, Acts 24:2). Such an `h3` follows a fragment of the same verse that
         ends mid-sentence; a real mid-verse heading follows a sentence end (ESV Mark
         16:9, after `.]`). The slice is appended to that fragment as is, so the word
-        it splits is joined again. Every mid-verse `h3` is logged for review.
+        it splits is joined again. Where it starts a new word instead (Matthew 9:17
+        `…쓰게` + `<h3>된다.</h3>`) nothing in the markup says so; such verses, read on
+        their pages, are listed in `BIBLEGATEWAY_SPACED_HEADING_TEXT_TOKENS` and joined
+        with a space. Every mid-verse `h3` is logged for review.
 
         Runs after every other removable is gone, so "the fragment before" is verse
         text: KLB's Psalm 1 opens `<h2>제 1 권</h2><h4>(1－41)</h4><h3>…</h3>`, all
@@ -1781,6 +1787,8 @@ class HolyBibleScraper:
                     logger.warning("BibleGateway h3 inside verse %s follows a sentence end; dropped as a heading", token)
                 continue
             logger.warning("BibleGateway h3 inside verse %s continues a sentence; kept as verse text", token)
+            if token in BIBLEGATEWAY_SPACED_HEADING_TEXT_TOKENS:
+                previous.append(" ")
             for span in spans:
                 for child in list(span.contents):
                     previous.append(child.extract())

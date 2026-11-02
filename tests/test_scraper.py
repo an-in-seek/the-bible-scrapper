@@ -1076,6 +1076,22 @@ def test_parse_verses_from_biblegateway_keeps_verse_text_wrapped_in_h3() -> None
     ]
 
 
+@pytest.mark.parametrize(("token", "expected"), [("John-8-20", "다 쓸모없게된다. 끝"), ("Matt-9-17", "다 쓸모없게 된다. 끝")])
+def test_parse_verses_from_biblegateway_spaces_heading_text_only_for_listed_verses(token: str, expected: str) -> None:
+    # The markup is the same whether the h3 starts inside a word or a new word
+    # (Matthew 9:17); only the reviewed verses in the list are joined with a space.
+    html = f"""
+    <div class="passage-text"><div class="version-KLB">
+      <p><span class="text {token}"><sup class="versenum">1 </sup>다 쓸모없게</span></p><h3><span class="text {token}">된다.</span></h3><p><span class="text {token}">끝</span></p>
+    </div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_KLB_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.text for verse in verses] == [expected]
+
+
 def test_parse_verses_from_biblegateway_drops_heading_after_a_sentence_end_mid_verse() -> None:
     # ESV Mark 16:9: a real heading sits inside the verse, after the bracketed note.
     html = """
