@@ -103,7 +103,11 @@ BIBLEGATEWAY_BOOK_NAMES: tuple[str, ...] = (
 BIBLEGATEWAY_CRAWL_DELAY_SECONDS = 15.0
 # Verse spans carry an "OSIS-chapter-verse" class token, e.g. "Gen-1-1", "1Sam-1-23".
 # The book abbreviation differs from the search name, so only the numbers are used.
-BIBLEGATEWAY_VERSE_CLASS_PATTERN = re.compile(r"^[A-Za-z0-9]+-(\d{1,3})-(\d{1,3})$")
+# A paraphrase that prints verses together (KLB "6-7") names both ends in one token,
+# "Gen-1-6-Gen-1-7"; the single-verse pattern alone skipped those spans and lost the text.
+BIBLEGATEWAY_VERSE_CLASS_PATTERN = re.compile(
+    r"^([A-Za-z0-9]+)-(\d{1,3})-(\d{1,3})(?:-([A-Za-z0-9]+)-(\d{1,3})-(\d{1,3}))?$"
+)
 # Dropped from the container before verse extraction. Every `h4` goes, not just
 # `h4.psalm-title`: headings carry the class of the verse they precede, so the parser
 # folds them into that verse. WEB/ASV use `h4.psalm-title` for superscriptions, NIV a
@@ -111,11 +115,19 @@ BIBLEGATEWAY_VERSE_CLASS_PATTERN = re.compile(r"^[A-Za-z0-9]+-(\d{1,3})-(\d{1,3}
 # ("א Aleph."), WEB and NIV mark Song of Songs speakers with `h4.speaker`, sometimes
 # mid-verse. Listing only psalm-title left 22 ASV and at least 27 WEB verses stored
 # with those labels. `p.translation-note` is NIV's "[The earliest manuscripts…]" note,
-# tagged with the class of the verse after it (Mark 16:9, John 7:53).
+# tagged with the class of the verse after it (Mark 16:9, John 7:53). `h2` is the
+# Psalter book heading before Psalms 1, 42, 73, 90 and 107 (WEB "BOOK 1", ASV "Book I",
+# KLB "제 1 권"); WEB and ASV were loaded with it at the head of those five verses.
 BIBLEGATEWAY_CONTAINER_REMOVABLE_SELECTOR = (
-    "div.footnotes, div.crossrefs, h4, p.psalm-title, h3, "
+    "div.footnotes, div.crossrefs, h2, h4, p.psalm-title, h3, "
     "p.translation-note, a.full-chap-link, div.passage-other-trans"
 )
+# The only `h2` seen in a passage. Any other is still dropped, with a warning, since
+# that rule rests on these five places alone.
+BIBLEGATEWAY_PSALTER_BOOK_HEADING_TOKENS = frozenset(f"Ps-{psalm}-1" for psalm in (1, 42, 73, 90, 107))
+# Verses whose text an `h3` cuts at a word boundary rather than inside a word. The markup
+# is the same either way (`</p><h3>`), so each was read on its page before being listed.
+BIBLEGATEWAY_SPACED_HEADING_TEXT_TOKENS = frozenset({"Matt-9-17"})
 # Dropped from each verse span. Kept separate from the container pass so a span can
 # still be inspected for the footnote marker that flags an untranslated verse.
 BIBLEGATEWAY_INLINE_REMOVABLE_SELECTOR = (
@@ -1252,9 +1264,10 @@ class HolyBibleScraper:
             return bskorea_verses
 
         # Must run before the generic parsers: they would read BibleGateway
-        # footnotes and navigation labels as verses.
+        # footnotes and navigation labels as verses. For the same reason a BibleGateway
+        # page stops here when nothing parsed, so a refused verse range skips the chapter.
         biblegateway_verses = self._extract_verses_from_biblegateway_passage(soup)
-        if biblegateway_verses:
+        if biblegateway_verses or self._is_biblegateway_source():
             return biblegateway_verses
 
         # Must also precede the generic parsers: the regex fallback happily parses an
@@ -1719,6 +1732,92 @@ class HolyBibleScraper:
         verses.sort(key=lambda verse: verse.verse_number)
         return verses
 
+    @staticmethod
+    def _biblegateway_verse_token(node: Tag) -> str | None:
+        for css_class in node.get("class", []):
+            if BIBLEGATEWAY_VERSE_CLASS_PATTERN.match(css_class):
+                return css_class
+        return None
+
+    def _restore_biblegateway_verse_text_in_headings(self, working: BeautifulSoup) -> None:
+        """
+        Move verse text the page wraps in an `h3` back into its verse, before the
+        heading rule deletes it.
+
+        KLB sets a few mid-verse slices in an `h3`, starting inside a word:
+        `…헌금</span></p><h3><span class="text John-8-20">함 앞…</span></h3><p>…`
+        (John 8:20, Acts 24:2). Such an `h3` follows a fragment of the same verse that
+        ends mid-sentence; a real mid-verse heading follows a sentence end (ESV Mark
+        16:9, after `.]`). The slice is appended to that fragment as is, so the word
+        it splits is joined again. Where it starts a new word instead (Matthew 9:17
+        `…쓰게` + `<h3>된다.</h3>`) nothing in the markup says so; such verses, read on
+        their pages, are listed in `BIBLEGATEWAY_SPACED_HEADING_TEXT_TOKENS` and joined
+        with a space. Every mid-verse `h3` is logged for review.
+
+        Runs after every other removable is gone, so "the fragment before" is verse
+        text: KLB's Psalm 1 opens `<h2>제 1 권</h2><h4>(1－41)</h4><h3>…</h3>`, all
+        tagged `Ps-1-1`, and the `h2` once passed for the start of the verse.
+        """
+        for heading in working.select("h3"):
+            spans = heading.select("span.text")
+            token = self._biblegateway_verse_token(spans[0]) if spans else None
+            if token is None:
+                continue
+            previous = heading.find_previous(
+                lambda node: node.name == "span"
+                and "text" in node.get("class", [])
+                and node.find_parent("h3") is None
+                and node.find_parent("span", class_="text") is None
+            )
+            if previous is None or self._biblegateway_verse_token(previous) != token:
+                continue  # an ordinary heading before the verse it names
+            tail = "".join(
+                string for string in previous.find_all(string=True) if string.find_parent("sup") is None
+            ).rstrip()
+            if not tail[-1:].isalnum():
+                spilled = self._biblegateway_spilled_chapter_title(heading, token)
+                if spilled:
+                    logger.warning(
+                        "BibleGateway h3 inside verse %s is followed only by a parenthesis at the passage end; "
+                        "dropped with it as the next chapter's heading", token,
+                    )
+                    for span in spilled:
+                        span.decompose()
+                else:
+                    logger.warning("BibleGateway h3 inside verse %s follows a sentence end; dropped as a heading", token)
+                continue
+            logger.warning("BibleGateway h3 inside verse %s continues a sentence; kept as verse text", token)
+            if token in BIBLEGATEWAY_SPACED_HEADING_TEXT_TOKENS:
+                previous.append(" ")
+            for span in spans:
+                for child in list(span.contents):
+                    previous.append(child.extract())
+            heading.decompose()
+
+    def _biblegateway_spilled_chapter_title(self, heading: Tag, token: str) -> list[Tag]:
+        """
+        Return the spans after `heading` when they are the next chapter's title spilled
+        onto this page, else `[]`.
+
+        KLB's Psalm 130 page ends `…(8절 끝).</p></div><h3>(소제목)</h3><p><span
+        class="text Ps-130-8">(131편 표제)</span></p>`: Psalm 131's heading and title,
+        tagged with the last verse here, the title in a `p` where Psalm 131's own page
+        has `h4.psalm-title`. Only that shape qualifies: nothing but this verse follows
+        the heading, and all of it is one parenthesis.
+        """
+        following = heading.find_all_next(
+            lambda node: node.name == "span"
+            and "text" in node.get("class", [])
+            and node.find_parent("h3") is None
+            and node.find_parent("span", class_="text") is None
+        )
+        if not following or any(self._biblegateway_verse_token(span) != token for span in following):
+            return []
+        text = "".join(
+            string for span in following for string in span.find_all(string=True) if string.find_parent("sup") is None
+        ).strip()
+        return following if re.fullmatch(r"\([^()]*\)", text) else []
+
     def _extract_verses_from_biblegateway_passage(self, soup: BeautifulSoup) -> list[Verse]:
         """
         Parse a BibleGateway passage page:
@@ -1734,10 +1833,20 @@ class HolyBibleScraper:
 
         # Parallel translations render one container per version; keep the first.
         working = BeautifulSoup(str(container), "html.parser")
+        # `h3` goes last: a few hold verse text, judged against what is left.
         for removable in working.select(BIBLEGATEWAY_CONTAINER_REMOVABLE_SELECTOR):
+            if removable.name == "h3":
+                continue
+            if removable.name == "h2":
+                tokens = {self._biblegateway_verse_token(span) for span in removable.select("span.text")} - {None}
+                if tokens - BIBLEGATEWAY_PSALTER_BOOK_HEADING_TOKENS:
+                    logger.warning("BibleGateway h2 tagged %s is not a Psalter book heading; dropped", sorted(tokens))
             removable.decompose()
+        self._restore_biblegateway_verse_text_in_headings(working)
+        for heading in working.select("h3"):
+            heading.decompose()
 
-        fragments: list[tuple[int, int, str, bool]] = []
+        fragments: list[tuple[int, int, int, str, bool]] = []
         for node in working.select("span.text"):
             if node.find_parent("span", class_="text") is not None:
                 continue
@@ -1749,6 +1858,14 @@ class HolyBibleScraper:
                     break
             if token is None:
                 continue
+            chapter, first = int(token.group(2)), int(token.group(3))
+            last = first
+            if token.group(4) is not None:
+                last = int(token.group(6))
+                # Only a forward range within one chapter has an unambiguous home.
+                if token.group(4) != token.group(1) or int(token.group(5)) != chapter or last <= first:
+                    logger.warning("BibleGateway verse range %r not understood; chapter skipped", token.group(0))
+                    return []
 
             has_footnote = node.select_one("sup.footnote") is not None
             fragment = BeautifulSoup(str(node), "html.parser")
@@ -1774,20 +1891,30 @@ class HolyBibleScraper:
                 text = BIBLEGATEWAY_OMITTED_VERSE_TEXT
                 is_omitted = True
 
-            fragments.append((int(token.group(1)), int(token.group(2)), text, is_omitted))
+            fragments.append((chapter, first, last, text, is_omitted))
 
         if not fragments:
             return []
 
-        dominant_chapter = Counter(chapter for chapter, _, _, _ in fragments).most_common(1)[0][0]
+        dominant_chapter = Counter(chapter for chapter, _, _, _, _ in fragments).most_common(1)[0][0]
 
         # A single verse is split across several spans in poetry blocks
         # (Psalms 23:4 spans four), so fragments are joined, not deduplicated.
+        # A merged range is one printed unit: it is stored at every number it covers,
+        # like bskorea's "18-19", so numbering stays contiguous.
         merged: dict[int, list[tuple[str, bool]]] = {}
-        for chapter, verse_number, text, is_omitted in fragments:
+        covered_by: dict[int, tuple[int, int]] = {}
+        for chapter, first, last, text, is_omitted in fragments:
             if chapter != dominant_chapter:
                 continue
-            merged.setdefault(verse_number, []).append((text, is_omitted))
+            for verse_number in range(first, last + 1):
+                if covered_by.setdefault(verse_number, (first, last)) != (first, last):
+                    logger.warning(
+                        "BibleGateway verse %s is printed in two units (%s-%s and %s-%s); chapter skipped",
+                        verse_number, *covered_by[verse_number], first, last,
+                    )
+                    return []
+                merged.setdefault(verse_number, []).append((text, is_omitted))
 
         verses: list[Verse] = []
         for verse_number, parts in sorted(merged.items()):

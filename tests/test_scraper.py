@@ -997,6 +997,222 @@ def test_parse_verses_from_biblegateway_uppercases_small_caps() -> None:
     assert verses[1].text == "It read: THE KING OF THE FIXTURE."
 
 
+BIBLEGATEWAY_KLB_ENTRY_URL = "https://www.biblegateway.com/passage/?search=Genesis%201&version=KLB"
+
+
+def test_parse_verses_from_biblegateway_stores_merged_range_at_every_number() -> None:
+    # KLB prints some verses together ("6-7") and names both ends in one class token.
+    html = """
+    <div class="passage-text"><div class="passage-content"><div class="version-KLB">
+      <p><span class="text Gen-1-5" id="ko-KLB-5"><sup class="versenum">5 </sup>다섯째 절이다.</span></p>
+      <p><span class="text Gen-1-6-Gen-1-7" id="ko-KLB-6"><sup class="versenum">6-7 </sup>여섯째와 일곱째 절을 함께 옮겼다.</span></p>
+      <p><span class="text Gen-1-8" id="ko-KLB-7"><sup class="versenum">8 </sup>여덟째 절이다.</span></p>
+    </div></div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_KLB_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.verse_number for verse in verses] == [5, 6, 7, 8]
+    assert verses[1].text == verses[2].text == "여섯째와 일곱째 절을 함께 옮겼다."
+
+
+def test_parse_verses_from_biblegateway_joins_split_spans_of_a_merged_range() -> None:
+    html = """
+    <div class="passage-text"><div class="passage-content"><div class="version-KLB">
+      <div class="poetry">
+        <p class="line"><span class="text Ps-23-1-Ps-23-2"><sup class="versenum">1-2 </sup>첫 줄이고</span><br>
+        <span class="text Ps-23-1-Ps-23-2">둘째 줄이다.</span></p>
+        <p class="line"><span class="text Ps-23-3"><sup class="versenum">3 </sup>셋째 절이다.</span></p>
+      </div>
+    </div></div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_KLB_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [(verse.verse_number, verse.text) for verse in verses] == [
+        (1, "첫 줄이고 둘째 줄이다."),
+        (2, "첫 줄이고 둘째 줄이다."),
+        (3, "셋째 절이다."),
+    ]
+
+
+def test_parse_verses_from_biblegateway_refuses_ranges_without_a_single_home() -> None:
+    # A range into the next chapter, a backwards range, a verse printed both inside a
+    # range and on its own, a range into another book, and a one-verse "range": no
+    # guess is made, the chapter parses empty.
+    cases = [
+        '<span class="text Gen-1-30">서른째.</span><span class="text Gen-1-31-Gen-2-1">걸친 범위.</span>',
+        '<span class="text Gen-1-6">여섯째.</span><span class="text Gen-1-8-Gen-1-7">거꾸로.</span>',
+        '<span class="text Gen-1-6-Gen-1-7">묶음.</span><span class="text Gen-1-7">따로.</span>',
+        '<span class="text Gen-1-6-Exod-1-7">다른 책.</span>',
+        '<span class="text Gen-1-7-Gen-1-7">폭 1.</span>',
+    ]
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_KLB_ENTRY_URL)
+
+    for spans in cases:
+        html = f'<div class="passage-text"><div class="version-KLB"><p>{spans}</p></div></div>'
+        assert scraper.parse_verses_from_html(html) == [], spans
+
+
+def test_parse_verses_from_biblegateway_keeps_verse_text_wrapped_in_h3() -> None:
+    # KLB wraps a few mid-verse slices in an h3 that starts inside a word (John 8:20).
+    # The slice rejoins its word; the paragraph after it starts a new word.
+    html = """
+    <div class="passage-text"><div class="version-KLB">
+      <h3><span id="ko-KLB-1" class="text John-8-19">소제목</span></h3>
+      <p><span id="ko-KLB-2" class="text John-8-19"><sup class="versenum">19 </sup>앞 절이다.</span></p>
+      <p><span id="ko-KLB-3" class="text John-8-20"><sup class="versenum">20 </sup>성전 헌금</span></p><h3><span class="text John-8-20">함 곁에서 말한</span></h3><p><span class="text John-8-20">이 절이다.</span></p>
+    </div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_KLB_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [(verse.verse_number, verse.text) for verse in verses] == [
+        (19, "앞 절이다."),
+        (20, "성전 헌금함 곁에서 말한 이 절이다."),
+    ]
+
+
+@pytest.mark.parametrize(("token", "expected"), [("John-8-20", "다 쓸모없게된다. 끝"), ("Matt-9-17", "다 쓸모없게 된다. 끝")])
+def test_parse_verses_from_biblegateway_spaces_heading_text_only_for_listed_verses(token: str, expected: str) -> None:
+    # The markup is the same whether the h3 starts inside a word or a new word
+    # (Matthew 9:17); only the reviewed verses in the list are joined with a space.
+    html = f"""
+    <div class="passage-text"><div class="version-KLB">
+      <p><span class="text {token}"><sup class="versenum">1 </sup>다 쓸모없게</span></p><h3><span class="text {token}">된다.</span></h3><p><span class="text {token}">끝</span></p>
+    </div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_KLB_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.text for verse in verses] == [expected]
+
+
+def test_parse_verses_from_biblegateway_drops_heading_after_a_sentence_end_mid_verse() -> None:
+    # ESV Mark 16:9: a real heading sits inside the verse, after the bracketed note.
+    html = """
+    <div class="passage-text"><div class="version-ESV">
+      <p><span class="text Mark-16-8"><sup class="versenum">8 </sup>Verse eight.</span></p>
+      <p><span class="text Mark-16-9">[Some manuscripts end here.]</span></p>
+      <h3><span class="text Mark-16-9">A Heading Inside the Verse</span></h3>
+      <p><span class="text Mark-16-9"><sup class="versenum">9 </sup>Verse nine.</span></p>
+    </div></div>
+    """
+    scraper = HolyBibleScraper(entry_url="https://www.biblegateway.com/passage/?search=Mark%2016&version=ESV")
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.text for verse in verses] == ["Verse eight.", "[Some manuscripts end here.] Verse nine."]
+
+
+def test_parse_verses_from_biblegateway_drops_next_chapter_title_spilled_after_last_verse(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # KLB's Psalm 130 page ends with Psalm 131's heading and title, both tagged with
+    # verse 8, the title in a `p` rather than `h4.psalm-title`.
+    html = """
+    <div class="passage-text"><div class="version-KLB">
+      <div class="poetry"><p class="line"><span class="text Ps-130-7"><sup class="versenum">7 </sup>앞 절이다.</span><br/><span class="text Ps-130-8"><sup class="versenum">8 </sup>마지막 절의</span><br/><span class="text Ps-130-8">끝 줄이다.</span></p></div>
+      <h3><span class="text Ps-130-8">다음 시편의 소제목</span></h3>
+      <p class="first-line-none"><span class="text Ps-130-8">(다음 시편의 표제)</span></p>
+    </div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_KLB_ENTRY_URL)
+
+    with caplog.at_level("WARNING"):
+        verses = scraper.parse_verses_from_html(html)
+
+    assert [(verse.verse_number, verse.text) for verse in verses] == [(7, "앞 절이다."), (8, "마지막 절의 끝 줄이다.")]
+    assert "dropped with it as the next chapter's heading" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "after_heading",
+    [
+        # More of the verse than one parenthesis: verse text, as in ESV Mark 16:9.
+        '<p><span class="text Ps-130-8">(괄호) 뒤에도 본문이다.</span></p>',
+        # Another verse follows: the heading is not at the passage end.
+        '<p><span class="text Ps-130-8">(괄호)</span><span class="text Ps-130-9"><sup class="versenum">9 </sup>다음 절</span></p>',
+    ],
+)
+def test_parse_verses_from_biblegateway_keeps_text_after_a_mid_verse_heading_unless_a_spilled_title(
+    after_heading: str,
+) -> None:
+    html = f"""
+    <div class="passage-text"><div class="version-KLB">
+      <p><span class="text Ps-130-8"><sup class="versenum">8 </sup>끝 줄이다.</span></p>
+      <h3><span class="text Ps-130-8">소제목</span></h3>
+      {after_heading}
+    </div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_KLB_ENTRY_URL)
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert verses[0].text.startswith("끝 줄이다. (괄호)")
+
+
+@pytest.mark.parametrize(
+    ("version", "book_heading"),
+    [("KLB", "제 1 권"), ("WEB", "BOOK 1"), ("ASV", "Book I")],
+)
+def test_parse_verses_from_biblegateway_drops_psalter_book_heading(version: str, book_heading: str) -> None:
+    # Psalms 1, 42, 73, 90 and 107 open with an h2 book heading tagged with verse 1.
+    # It is no verse text, and it must not make the h3 after it look like a verse slice.
+    html = f"""
+    <div class="passage-text"><div class="version-{version}">
+      <h2><span id="ko-KLB-1" class="text Ps-1-1">{book_heading}</span></h2>
+      <h4><span class="text Ps-1-1">(1-41)</span></h4>
+      <h3><span class="text Ps-1-1">소제목</span></h3>
+      <div class="poetry"><p class="line"><span class="chapter-1"><span class="text Ps-1-1"><span class="chapternum">1 </span>첫 줄</span></span><br/><span class="text Ps-1-1">둘째 줄</span><br/><span id="ko-KLB-2" class="text Ps-1-2"><sup class="versenum">2 </sup>다음 절</span></p></div>
+    </div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=f"https://www.biblegateway.com/passage/?search=Psalm%201&version={version}")
+
+    verses = scraper.parse_verses_from_html(html)
+
+    assert [(verse.verse_number, verse.text) for verse in verses] == [(1, "첫 줄 둘째 줄"), (2, "다음 절")]
+
+
+@pytest.mark.parametrize(("token", "warned"), [("Ps-42-1", False), ("Isa-40-1", True)])
+def test_parse_verses_from_biblegateway_warns_about_h2_outside_psalter_book_headings(
+    token: str, warned: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    # An h2 is dropped either way; only the five book headings are known to hold no verse text.
+    html = f"""
+    <div class="passage-text"><div class="version-KLB">
+      <h2><span class="text {token}">머리글</span></h2>
+      <p><span class="text {token}"><sup class="versenum">1 </sup>첫 절</span></p>
+    </div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_KLB_ENTRY_URL)
+
+    with caplog.at_level("WARNING"):
+        verses = scraper.parse_verses_from_html(html)
+
+    assert [verse.text for verse in verses] == ["첫 절"]
+    assert ("is not a Psalter book heading" in caplog.text) is warned
+
+
+def test_biblegateway_page_does_not_fall_through_to_generic_parsers() -> None:
+    # A page the BibleGateway parser cannot read must not be handed to the generic
+    # parsers, which read numbered lines anywhere on the page as verses.
+    html = """
+    <div class="passage-text"><div class="version-KLB">
+      <p><span class="text Gen-1-1-Gen-2-1">걸친 범위.</span></p>
+    </div></div>
+    <ol><li>1 메뉴 항목</li><li>2 다른 항목</li></ol>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_KLB_ENTRY_URL)
+
+    assert scraper.parse_verses_from_html(html) == []
+    assert HolyBibleScraper(entry_url="https://example.com/bible").parse_verses_from_html(html) != []
+
+
 EBIBLE_ENTRY_URL = "https://ebible.org/spaRV1909/GEN01.htm"
 
 EBIBLE_CHAPTER_HTML = """

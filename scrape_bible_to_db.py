@@ -32,11 +32,12 @@ ENTRY_URL_ENV_BY_TRANSLATION_TYPE = {
     "ESV": "ESV_ENTRY_URL",
     "RNKSV": "RNKSV_ENTRY_URL",
     "KRV": "KRV_ENTRY_URL",
+    "KLB": "KLB_ENTRY_URL",
 }
 # A language code alone does not identify a source: 'en' covers KJV, WEB, ASV, NIV and ESV,
-# 'ko' covers NKRV, RNKSV and KRV.
+# 'ko' covers NKRV, RNKSV, KRV and KLB.
 TRANSLATION_TYPES_BY_LANGUAGE_CODE = {
-    "ko": ("NKRV", "RNKSV", "KRV"),
+    "ko": ("NKRV", "RNKSV", "KRV", "KLB"),
     "en": ("KJV", "WEB", "ASV", "NIV", "ESV"),
     "es": ("RVR1909", "SBLM"),
     "ja": ("JPNMEB", "KOUGO"),
@@ -50,7 +51,7 @@ LEGACY_TRANSLATION_TYPE_BY_ID = {"2": "NKRV"}
 # Tie-break when nothing else narrows it down; keeps the pre-WEB default.
 ENTRY_URL_PREFERENCE_ORDER = (
     "NKRV", "KJV", "WEB", "ASV", "RVR1909", "SBLM", "JPNMEB", "KOUGO", "CUVT", "CUVS",
-    "N1904", "LSG1910", "NIV", "ESV", "RNKSV", "KRV",
+    "N1904", "LSG1910", "NIV", "ESV", "RNKSV", "KRV", "KLB",
 )
 # Which source may legitimately produce each translation, and how to recognise the
 # translation when bible_translation.translation_type is empty. Drives the
@@ -173,6 +174,15 @@ TRANSLATION_SOURCE_REQUIREMENTS = {
         "source": "bskorea",
         "version": "HAN",
         "name": "개역한글",
+        "language_code": "ko",
+    },
+    "KLB": {
+        # 현대인의 성경 (1985), copyrighted by Biblica like NIV. BibleGateway also
+        # serves KOERV (읽기 쉬운 성경); the exact version match keeps the two apart,
+        # and the source keeps KLB apart from the three bskorea editions.
+        "source": "biblegateway",
+        "version": "KLB",
+        "name": "현대인의 성경",
         "language_code": "ko",
     },
 }

@@ -33,6 +33,7 @@
 - ESV(저작권 역본): [docs/english-standard-version-scraping-design.md](docs/english-standard-version-scraping-design.md)
 - 새번역 RNKSV(저작권 역본): [docs/revised-new-korean-standard-version-scraping-design.md](docs/revised-new-korean-standard-version-scraping-design.md)
 - 개역한글 KRV: [docs/korean-revised-version-scraping-design.md](docs/korean-revised-version-scraping-design.md)
+- 현대인의 성경 KLB(저작권 역본): [docs/korean-living-bible-scraping-design.md](docs/korean-living-bible-scraping-design.md)
 
 ## 주요 특징
 
@@ -71,6 +72,7 @@
 - `docs/english-standard-version-scraping-design.md`: ESV 설계 문서 (저작권 역본). 실측 결과와 권리 사항 포함
 - `docs/revised-new-korean-standard-version-scraping-design.md`: 새번역(RNKSV) 설계 문서 (저작권 역본). 표본 실측, 적재 결과, 개역개정과 공유하는 bskorea 경로의 결함(요나 `jnh`, 시편 표제 래퍼, 병합 절 번호 등)과 그 수정 포함
 - `docs/korean-revised-version-scraping-design.md`: 개역한글(KRV) 설계 문서. 기존 DB 본문과 대한성서공회 개역한글 페이지의 전권 대조 결과와 재적재 계획 포함
+- `docs/korean-living-bible-scraping-design.md`: 현대인의 성경(KLB) 설계 문서 (저작권 역본). 표본 실측, 권리 사항, BibleGateway 묶음 절(`6-7`) 처리 포함
 
 ## 요구 사항
 
@@ -129,10 +131,10 @@ CUVS_ENTRY_URL=https://zh.wikisource.org/zh-hans/%E8%81%96%E7%B6%93_(%E5%92%8C%E
 
 `--entry-url`를 지정하지 않으면 기본 URL은 아래 순서로 결정됩니다.
 
-1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JPNMEB` / `KOUGO` / `CUVT` / `CUVS` / `N1904` / `LSG1910` / `NIV` / `ESV` / `RNKSV` / `KRV`)에 해당하는 환경변수
+1. `BIBLE_TRANSLATION_TYPE`(`KJV` / `NKRV` / `WEB` / `ASV` / `RVR1909` / `SBLM` / `JPNMEB` / `KOUGO` / `CUVT` / `CUVS` / `N1904` / `LSG1910` / `NIV` / `ESV` / `RNKSV` / `KRV` / `KLB`)에 해당하는 환경변수
 2. `BIBLE_TRANSLATION_ID=2` 또는 `BIBLE_TRANSLATION_NAME=개역개정`이면 `NKRV_ENTRY_URL`
 3. `BIBLE_LANGUAGE_CODE`로 좁혀지는 소스가 하나면 그 값
-   - `ko` -> `NKRV_ENTRY_URL` / `RNKSV_ENTRY_URL` / `KRV_ENTRY_URL` 중 설정된 것
+   - `ko` -> `NKRV_ENTRY_URL` / `RNKSV_ENTRY_URL` / `KRV_ENTRY_URL` / `KLB_ENTRY_URL` 중 설정된 것
    - `en` -> `KJV_ENTRY_URL` / `WEB_ENTRY_URL` / `ASV_ENTRY_URL` / `NIV_ENTRY_URL` / `ESV_ENTRY_URL` 중 설정된 것
    - `es` -> `RVR1909_ENTRY_URL` / `SBLM_ENTRY_URL` 중 설정된 것
    - `ja` -> `JPNMEB_ENTRY_URL` / `KOUGO_ENTRY_URL` 중 설정된 것
@@ -140,11 +142,11 @@ CUVS_ENTRY_URL=https://zh.wikisource.org/zh-hans/%E8%81%96%E7%B6%93_(%E5%92%8C%E
    - `el` -> `N1904_ENTRY_URL` (본문은 코이네 그리스어지만 DB의 `language_code` CHECK가 `grc`가 아닌 `el`을 허용하므로 `el`로 등록되어 있습니다)
    - `fr` -> `LSG1910_ENTRY_URL`
 4. 설정된 엔트리 URL이 하나뿐이면 그 값
-5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JPNMEB` -> `KOUGO` -> `CUVT` -> `CUVS` -> `N1904` -> `LSG1910` -> `NIV` -> `ESV` -> `RNKSV` -> `KRV` 순으로 선택
+5. 여러 개가 남으면 `NKRV` -> `KJV` -> `WEB` -> `ASV` -> `RVR1909` -> `SBLM` -> `JPNMEB` -> `KOUGO` -> `CUVT` -> `CUVS` -> `N1904` -> `LSG1910` -> `NIV` -> `ESV` -> `RNKSV` -> `KRV` -> `KLB` 순으로 선택
 6. 아무것도 없으면 내장 기본값 `https://thekingsbible.com/Bible/1/1` 사용
 
 주의: `BIBLE_LANGUAGE_CODE`만으로는 소스가 특정되지 않습니다.  
-`ko`(NKRV / RNKSV / KRV), `en`(KJV / WEB / ASV / NIV / ESV), `es`(RVR1909 / SBLM), `ja`(JPNMEB / KOUGO), `zh`(CUVT / CUVS) 모두 소스가 둘 이상이라,  
+`ko`(NKRV / RNKSV / KRV / KLB), `en`(KJV / WEB / ASV / NIV / ESV), `es`(RVR1909 / SBLM), `ja`(JPNMEB / KOUGO), `zh`(CUVT / CUVS) 모두 소스가 둘 이상이라,  
 해당 엔트리 URL이 여러 개 설정된 상태에서 언어 코드만 주면 실행이 중단됩니다.  
 이때는 `BIBLE_TRANSLATION_TYPE`을 지정하거나 `--entry-url`을 명시해야 합니다.
 
@@ -322,6 +324,7 @@ WEB과 다른 점:
 
 - ASV는 편집자 소제목(`h3`)과 시편 표제(`h4.psalm-title`)를 함께 사용하며, 둘 다 1절 클래스를 갖습니다. 파서가 제거하므로 절 본문에 섞이지 않습니다.
 - `h4`는 클래스와 관계없이 모두 제거합니다. 시 119편의 히브리 자모(`h4.psalm-acrostic`, ASV·NIV)와 아가의 화자 표시(`h4.speaker`, WEB·NIV)도 다음 절의 클래스를 달고 있어서, 남겨 두면 절 앞이나 절 중간에 섞입니다. 예전 규칙은 `h4.psalm-title`만 지워서 ASV 시 119편과 WEB 아가가 오염된 채 적재됐습니다. 보정 절차는 [NIV 설계 문서](docs/new-international-version-scraping-design.md) 8절에 있습니다.
+- 시 1·42·73·90·107편 첫머리의 권 표제(`h2`, WEB `BOOK 1`, ASV `Book I`)도 1절 클래스를 답니다. 2026-11-01부터 지웁니다. 그 전에 적재한 WEB·ASV는 이 다섯 절이 권 표제로 시작했고, 같은 날 10행을 제자리 수정했습니다([KLB 설계 문서](docs/korean-living-bible-scraping-design.md) 6.3·12.1절).
 - ASV가 본문에서 빼는 절은 스팬 자체가 없어 `(omitted)` 마커가 생성되지 않습니다. 절 번호에 구멍이 생기며, 처리 방향은 설계 문서 7절을 참고하세요.
 - 각주가 WEB보다 3~5배 많습니다.
 
@@ -575,6 +578,27 @@ RNKSV_ENTRY_URL=https://www.bskorea.or.kr/bible/korbibReadpage.php?version=SAENE
 KRV_ENTRY_URL=https://www.bskorea.or.kr/bible/korbibReadpage.php?version=HAN&book=gen&chap=1&sec=1&cVersion=&fontSize=15px&fontWeight=normal
 ```
 
+### 16. KLB `biblegateway.com`
+
+현대인의 성경(Korean Living Bible, 1985, `version=KLB`)은 **저작권 역본**입니다(Biblica). WEB·ASV·NIV·ESV와 같은 소스·같은 파서를 쓰고, 엔트리 URL 해석과 소스/역본 검증에 `KLB`로 등록되어 있습니다. 같은 사이트의 `KOERV`(읽기 쉬운 성경)는 별개 역본이라 거부합니다.
+
+- KLB는 몇 절을 묶어 옮긴 곳이 있습니다(`6-7`). BibleGateway는 이런 스팬에 `Gen-1-6-Gen-1-7`처럼 양 끝을 이은 클래스를 다는데, 예전 파서는 이 형태를 몰라 스팬째 건너뛰었습니다. 표본 37개 장에서 8절이 빠지고, `1-3`으로 시작하는 시 92편은 장 전체가 건너뛰어졌습니다.
+  지금은 묶음이 덮는 모든 번호에 같은 본문을 저장합니다(개역개정의 `18-19`와 같은 처리). 다른 장으로 넘어가는 묶음, 거꾸로 된 묶음, 한 번호가 두 단위에 든 장은 추측하지 않고 건너뜁니다. 이때 BibleGateway 페이지는 범용 파서로 넘기지 않습니다.
+- KLB 페이지는 몇 곳에서 절 중간의 본문을 소제목 태그(`h3`)에 넣어 둡니다(요 8:20, 행 24:2). 소제목을 모두 지우던 규칙으로는 이 본문이 사라졌습니다.
+  지금은 같은 절의 앞 조각이 문장 중간에서 끝난 뒤에 오는 `h3`을 본문으로 되돌리고, 판정마다 경고 로그를 남깁니다. 문장 끝 뒤의 소제목(ESV 막 16:9 등)은 그대로 지웁니다.
+  마 9:17은 `h3`이 낱말 경계에서 시작해(`쓰게` + `된다.`) 공백이 필요한데, 마크업으로는 낱말 중간과 구별되지 않습니다. 페이지에서 확인한 절만 `BIBLEGATEWAY_SPACED_HEADING_TEXT_TOKENS`에 적어 띄어 잇습니다(1행, 2026-11-02 제자리 수정).
+  판정은 다른 제거 대상(`h2` 권 표제, `h4` 등)을 지운 뒤에 합니다. 먼저 판정하던 첫 구현은 시 1:1과 42:1에서 권 표제(`제 1 권`)를 절의 앞 조각으로 보고, 소제목까지 본문으로 넣었습니다.
+- 시 130편 페이지 끝에는 131편의 소제목과 표제가 130:8의 클래스를 달고 붙어 있습니다. 표제가 `h4`가 아니라 일반 문단이라 처음에는 8절 끝에 들어갔습니다(1행, 2026-11-01 제자리 수정).
+  지금은 문장 끝 뒤의 소제목 다음에 페이지 끝까지 그 절의 괄호 한 덩어리만 남으면 다음 장 표제로 보고 함께 지우며, 따로 경고를 남깁니다.
+- 비평본문이 빼는 16곳 중 표본의 7곳(막 7:16 등)은 KLB가 자기 칸에 `(없음)`을 싣습니다. 페이지 그대로 저장합니다.
+- 아가의 화자 표기 `(여자)`·`(남자)`·`(예루살렘 여자들)`·`(여자의 오빠들)`(38개)는 사용자 결정으로 **남깁니다**. 새번역과 달리 말이 시작되는 자리에 붙어 있습니다. DB에서 아가 본문에 화자 표기가 있는 역본은 KLB뿐입니다.
+- Biblica의 무허가 인용 한도(500절)와 BibleGateway 이용약관(복사·보관 금지)을 넘는다는 점을 전달받은 뒤 사용자가 적재를 지시했습니다(2026-11-01). 요청 제한을 피하려고 30초 간격으로 이틀에 나눠 받았고, 결과는 66권 / 1,189장 / **31,104절**입니다(2026-11-01–02). KJV와 다른 좌표는 요삼 1:15와 계 12:18이고, `(없음)`은 7곳입니다.
+  근거와 실측은 [설계 문서](docs/korean-living-bible-scraping-design.md)에 있습니다. **이 DB는 자유롭게 배포할 수 없습니다.**
+
+```env
+KLB_ENTRY_URL=https://www.biblegateway.com/passage/?search=Genesis%201&version=KLB
+```
+
 ## 네트워크와 재시도
 
 - `429`, `502`, `503`, `504` 응답은 자동 재시도합니다. 그 밖의 HTTP 오류와 연결 오류(`requests.RequestException`)도 같은 재시도(최대 7회 시도)에 걸립니다.
@@ -589,7 +613,7 @@ KRV_ENTRY_URL=https://www.bskorea.or.kr/bible/korbibReadpage.php?version=HAN&boo
   - 66권 전권 적재는 1,189 요청이며 약 5시간이 걸립니다.
   - 다만 NIV 적재 때 15~18초 간격으로 약 800번째 요청에서 일시 제한을 받았고, 30~33초 간격에서는 남은 426장 동안 제한이 없었습니다.
     전권을 받을 때는 `--min-delay 30`을 주는 편이 안전합니다(약 10~11시간).
-  - 그래도 ESV 적재 때는 30초 간격으로 약 1,000회 요청한 뒤 제한을 받았습니다. 제한은 누적 요청 수에 걸리는 것으로 보이므로, 전권은 하루 1,000회 미만으로 나눠 받는 편이 안전합니다.
+  - 그래도 ESV 적재 때는 30초 간격으로 약 1,000회 요청한 뒤 제한을 받았습니다. 제한은 누적 요청 수에 걸리는 것으로 보이므로, 전권은 어느 24시간이든 1,000회 미만이 되도록 나눠 받는 편이 안전합니다. 달력의 하루가 아닙니다. KLB는 23:30까지 약 932회를 보내고 8시간 반 쉰 뒤, 다음 날 아침 178회째에 제한을 받았습니다.
 
 ## 실행 방법
 
