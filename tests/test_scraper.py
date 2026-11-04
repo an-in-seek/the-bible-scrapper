@@ -1092,6 +1092,100 @@ def test_parse_verses_from_biblegateway_spaces_heading_text_only_for_listed_vers
     assert [verse.text for verse in verses] == [expected]
 
 
+def test_parse_verses_from_biblegateway_drops_plain_text_heading_only_for_listed_verses(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # KLB 1 Kings 2:9 ends with the next paragraph's heading as plain text. Only the
+    # listed verse of the listed version loses it; an unlisted verse of the same shape,
+    # or the same verse read as another version, keeps its text, and a listed verse
+    # that no longer ends that way is kept with a warning.
+    html = """
+    <div class="passage-text"><div class="version-KLB">
+      <p><span class="text 1Kgs-2-8"><sup class="versenum">8 </sup>앞 절이다. 이어지는 말</span></p>
+      <p><span class="text 1Kgs-2-9"><sup class="versenum">9 </sup>그렇게 하여라.” 지어낸 소제목</span></p>
+      <p><span class="text 1Kgs-2-10"><sup class="versenum">10 </sup>다음 절이다.</span></p>
+    </div></div>
+    """
+    scraper = HolyBibleScraper(entry_url=BIBLEGATEWAY_KLB_ENTRY_URL)
+    other_version = HolyBibleScraper(entry_url="https://www.biblegateway.com/passage/?search=1%20Kings%202&version=NIV")
+
+    with caplog.at_level("WARNING"):
+        verses = scraper.parse_verses_from_html(html)
+        changed = scraper.parse_verses_from_html(html.replace(" 지어낸 소제목", ""))
+    as_other_version = other_version.parse_verses_from_html(html)
+
+    assert [(verse.verse_number, verse.text) for verse in verses] == [
+        (8, "앞 절이다. 이어지는 말"),
+        (9, "그렇게 하여라.”"),
+        (10, "다음 절이다."),
+    ]
+    assert changed[1].text == "그렇게 하여라.”"
+    assert as_other_version[1].text == "그렇게 하여라.” 지어낸 소제목"
+    assert [record.getMessage() for record in caplog.records] == [
+        "BibleGateway verse 1Kgs-2-9 is listed with a trailing heading, but none was found; kept as is"
+    ]
+
+
+def test_parse_verses_from_biblegateway_moves_next_verse_h3_text_back_to_the_verse_it_ends(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # KLB Matthew 15:25: the end of verse 25 sits in an h3 tagged, with an id, as the
+    # start of verse 26. A real heading after a verse that runs on has no sentence end
+    # (Luke 23:2), and another version keeps the old reading.
+    def page(token: str, before: str, heading: str) -> str:
+        book, chapter, verse = token.rsplit("-", 2)
+        following = f"{book}-{chapter}-{int(verse) + 1}"
+        return f"""
+        <div class="passage-text"><div class="version-KLB">
+          <p><span class="text {token}"><sup class="versenum">{verse} </sup>{before}</span></p> <h3><span id="ko-KLB-9" class="text {following}">{heading}</span></h3><p><span class="text {following}"><sup class="versenum">{int(verse) + 1} </sup>다음 절이다.</span></p>
+        </div></div>
+        """
+
+    klb = HolyBibleScraper(entry_url=BIBLEGATEWAY_KLB_ENTRY_URL)
+    niv = HolyBibleScraper(entry_url="https://www.biblegateway.com/passage/?search=Matthew%2015&version=NIV")
+    split_word = page("Matt-15-25", "엎드려 절하며 말", "하였다. “도와주십시오.”")
+    new_word = page("Heb-13-12", "성문 밖에서 고난을", "받으셨다.")
+    real_heading = page("Luke-23-1", "그를 끌고 가서", "지어낸 소제목")
+    # Numbers 13:4: the first line of a list; Esther 9:12: a listed heading, then the verse's end.
+    list_line = page("Num-13-4", "그들은 다음과 같다:", "지어낸 지파에서 지어낸 이름,")
+    listed = page("Esth-9-12", "원하는 것이 무엇이오?", "유대인들의 승리지어낸 말을 하시오.”")
+    unlisted = page("Esth-9-11", "원하는 것이 무엇이오?", "유대인들의 승리지어낸 말을 하시오.”")
+    changed = page("Esth-9-12", "원하는 것이 무엇이오?", "다른 소제목지어낸 말을 하시오.”")
+
+    with caplog.at_level("WARNING"):
+        restored = [verse.text for verse in klb.parse_verses_from_html(split_word)]
+        spaced = [verse.text for verse in klb.parse_verses_from_html(new_word)]
+        kept_heading = [verse.text for verse in klb.parse_verses_from_html(real_heading)]
+        list_restored = [verse.text for verse in klb.parse_verses_from_html(list_line)]
+        listed_restored = [verse.text for verse in klb.parse_verses_from_html(listed)]
+        unlisted_dropped = [verse.text for verse in klb.parse_verses_from_html(unlisted)]
+        changed_dropped = [verse.text for verse in klb.parse_verses_from_html(changed)]
+    other_version = [verse.text for verse in niv.parse_verses_from_html(split_word)]
+    other_version_list = [verse.text for verse in niv.parse_verses_from_html(list_line)]
+
+    assert restored == ["엎드려 절하며 말하였다. “도와주십시오.”", "다음 절이다."]
+    assert spaced == ["성문 밖에서 고난을 받으셨다.", "다음 절이다."]
+    assert kept_heading == ["그를 끌고 가서", "다음 절이다."]
+    assert list_restored == ["그들은 다음과 같다: 지어낸 지파에서 지어낸 이름,", "다음 절이다."]
+    assert listed_restored == ["원하는 것이 무엇이오? 지어낸 말을 하시오.”", "다음 절이다."]
+    assert unlisted_dropped == ["원하는 것이 무엇이오?", "다음 절이다."]
+    assert changed_dropped == ["원하는 것이 무엇이오?", "다음 절이다."]
+    assert other_version == ["엎드려 절하며 말", "다음 절이다."]
+    assert other_version_list == ["그들은 다음과 같다:", "다음 절이다."]
+    assert [record.getMessage() for record in caplog.records] == [
+        "BibleGateway h3 tagged Matt-15-26 ends a sentence after verse Matt-15-25, which stops mid-sentence; "
+        "moved back as that verse's text",
+        "BibleGateway h3 tagged Heb-13-13 ends a sentence after verse Heb-13-12, which stops mid-sentence; "
+        "moved back as that verse's text",
+        "BibleGateway h3 tagged Num-13-5 ends in a comma after verse Num-13-4, which ends in a colon; "
+        "moved back as that verse's text",
+        "BibleGateway h3 tagged Esth-9-13 holds a listed heading and then the end of verse Esth-9-12; "
+        "heading dropped, the rest moved back",
+        "BibleGateway h3 tagged Esth-9-13 is listed as a heading before verse text, but does not match; "
+        "dropped as a heading",
+    ]
+
+
 def test_parse_verses_from_biblegateway_drops_heading_after_a_sentence_end_mid_verse() -> None:
     # ESV Mark 16:9: a real heading sits inside the verse, after the bracketed note.
     html = """

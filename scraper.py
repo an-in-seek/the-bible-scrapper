@@ -127,7 +127,31 @@ BIBLEGATEWAY_CONTAINER_REMOVABLE_SELECTOR = (
 BIBLEGATEWAY_PSALTER_BOOK_HEADING_TOKENS = frozenset(f"Ps-{psalm}-1" for psalm in (1, 42, 73, 90, 107))
 # Verses whose text an `h3` cuts at a word boundary rather than inside a word. The markup
 # is the same either way (`</p><h3>`), so each was read on its page before being listed.
-BIBLEGATEWAY_SPACED_HEADING_TEXT_TOKENS = frozenset({"Matt-9-17"})
+# Listed by the verse that takes the text back, which for a next-verse `h3` is the one before.
+BIBLEGATEWAY_SPACED_HEADING_TEXT_TOKENS = frozenset({"Matt-9-17", "Luke-1-19", "Heb-13-12", "Rev-21-11"})
+# Versions whose next-verse `h3` can hold the end of the verse before it (KLB Matthew 15:25
+# `…말</span></p><h3><span id=… class="text Matt-15-26">하였다. (본문)</span></h3>`). Checked on
+# KLB pages only: an English heading may end in "?" after a verse that runs on.
+BIBLEGATEWAY_NEXT_VERSE_HEADING_TEXT_VERSIONS = frozenset({"KLB"})
+# Next-verse `h3`s that open with a heading and continue, with nothing between them, with
+# the end of the verse before (KLB Esther 9:12 `…무엇이오?</span></p><h3><span …Esth-9-13">
+# 유대인들의 승리(본문).”</span></h3>`). No markup separates the two, so each was read on its
+# page; keyed by version and the `h3`'s token, with the heading it opens with.
+BIBLEGATEWAY_HEADING_BEFORE_VERSE_TEXT = {
+    "KLB": {"Esth-9-13": "유대인들의 승리"},
+}
+# Verses whose span ends, after the verse's last sentence, with a section heading the page
+# sets as plain text: KLB 1 Kings 2:9 `(본문).” (소제목)</span>`, Luke 1:80 with the next
+# chapter's. No markup marks it, so each was read on its page before being listed; what
+# follows the last sentence end is dropped. Keyed by version: every edition on the site
+# uses the same token for the same verse.
+BIBLEGATEWAY_TRAILING_HEADING_TOKENS = {
+    "KLB": frozenset({
+        "1Kgs-1-27", "1Kgs-2-9", "1Kgs-2-12", "1Kgs-2-25", "1Kgs-2-35", "1Kgs-3-15", "1Kgs-7-12", "1Kgs-7-14",
+        "1Chr-16-6", "2Chr-7-10", "Isa-23-1", "Mark-5-43", "Luke-1-80", "Heb-5-10", "Heb-10-39", "Jas-3-12",
+    }),
+}
+BIBLEGATEWAY_TRAILING_HEADING_PATTERN = re.compile(r"(.*[.?!][\"'”’]?)\s+[^.?!\"'“”‘’()]{1,30}", re.DOTALL)
 # Dropped from each verse span. Kept separate from the container pass so a span can
 # still be inspected for the footnote marker that flags an untranslated verse.
 BIBLEGATEWAY_INLINE_REMOVABLE_SELECTOR = (
@@ -1754,10 +1778,22 @@ class HolyBibleScraper:
         their pages, are listed in `BIBLEGATEWAY_SPACED_HEADING_TEXT_TOKENS` and joined
         with a space. Every mid-verse `h3` is logged for review.
 
+        KLB also puts the end of a verse in an `h3` tagged, with an `id`, as the start
+        of the next verse (Matthew 15:25 `…말` + `<h3 …Matt-15-26>하였다. (본문)</h3>`),
+        where it looks like that verse's heading. It is moved back only when the verse
+        before stops mid-sentence and the `h3` ends a sentence: a real heading after a
+        verse that runs on has no sentence end (Luke 23:2, `재판과 선고`). The same goes,
+        with a space, for the first line of a list after a verse ending in a colon
+        (Numbers 13:4 `다음과 같다:` + `<h3>(이름),</h3>`): no heading ends in a comma.
+        Where the `h3` holds a heading and then the verse's end, the heading listed in
+        `BIBLEGATEWAY_HEADING_BEFORE_VERSE_TEXT` is cut off and the rest moved back.
+
         Runs after every other removable is gone, so "the fragment before" is verse
         text: KLB's Psalm 1 opens `<h2>제 1 권</h2><h4>(1－41)</h4><h3>…</h3>`, all
         tagged `Ps-1-1`, and the `h2` once passed for the start of the verse.
         """
+        next_verse_text = self.get_source_version() in BIBLEGATEWAY_NEXT_VERSE_HEADING_TEXT_VERSIONS
+        listed_headings = BIBLEGATEWAY_HEADING_BEFORE_VERSE_TEXT.get(self.get_source_version() or "", {})
         for heading in working.select("h3"):
             spans = heading.select("span.text")
             token = self._biblegateway_verse_token(spans[0]) if spans else None
@@ -1769,11 +1805,18 @@ class HolyBibleScraper:
                 and node.find_parent("h3") is None
                 and node.find_parent("span", class_="text") is None
             )
-            if previous is None or self._biblegateway_verse_token(previous) != token:
-                continue  # an ordinary heading before the verse it names
+            if previous is None:
+                continue
+            previous_token = self._biblegateway_verse_token(previous)
             tail = "".join(
                 string for string in previous.find_all(string=True) if string.find_parent("sup") is None
             ).rstrip()
+            if previous_token != token:
+                if next_verse_text and self._biblegateway_verses_adjacent(previous_token, token):
+                    self._restore_biblegateway_next_verse_heading_text(
+                        heading, spans, previous, previous_token, token, tail, listed_headings.get(token)
+                    )
+                continue  # otherwise an ordinary heading before the verse it names
             if not tail[-1:].isalnum():
                 spilled = self._biblegateway_spilled_chapter_title(heading, token)
                 if spilled:
@@ -1787,12 +1830,73 @@ class HolyBibleScraper:
                     logger.warning("BibleGateway h3 inside verse %s follows a sentence end; dropped as a heading", token)
                 continue
             logger.warning("BibleGateway h3 inside verse %s continues a sentence; kept as verse text", token)
-            if token in BIBLEGATEWAY_SPACED_HEADING_TEXT_TOKENS:
-                previous.append(" ")
-            for span in spans:
-                for child in list(span.contents):
-                    previous.append(child.extract())
-            heading.decompose()
+            self._append_biblegateway_heading_text(heading, spans, previous, token in BIBLEGATEWAY_SPACED_HEADING_TEXT_TOKENS)
+
+    def _restore_biblegateway_next_verse_heading_text(
+        self,
+        heading: Tag,
+        spans: list[Tag],
+        previous: Tag,
+        previous_token: str,
+        token: str,
+        tail: str,
+        listed_heading: str | None,
+    ) -> None:
+        strings = [string for span in spans for string in span.find_all(string=True) if string.find_parent("sup") is None]
+        joined = "".join(strings)
+        text = joined.strip()
+        if listed_heading is not None:
+            rest = text[len(listed_heading):]
+            if not text.startswith(listed_heading) or not re.search(r"[.?!][\"'”’]?$", rest):
+                logger.warning(
+                    "BibleGateway h3 tagged %s is listed as a heading before verse text, but does not match; "
+                    "dropped as a heading", token,
+                )
+                return
+            logger.warning(
+                "BibleGateway h3 tagged %s holds a listed heading and then the end of verse %s; "
+                "heading dropped, the rest moved back", token, previous_token,
+            )
+            remaining = len(listed_heading) + len(joined) - len(joined.lstrip())
+            for string in strings:
+                if remaining <= 0:
+                    break
+                cut = min(remaining, len(string))
+                string.replace_with(string[cut:])
+                remaining -= cut
+            self._append_biblegateway_heading_text(heading, spans, previous, spaced=True)
+        elif tail[-1:].isalnum() and re.search(r"[.?!][\"'”’]?$", text):
+            logger.warning(
+                "BibleGateway h3 tagged %s ends a sentence after verse %s, which stops mid-sentence; "
+                "moved back as that verse's text", token, previous_token,
+            )
+            self._append_biblegateway_heading_text(
+                heading, spans, previous, previous_token in BIBLEGATEWAY_SPACED_HEADING_TEXT_TOKENS
+            )
+        elif tail.endswith(":") and text.endswith(","):
+            logger.warning(
+                "BibleGateway h3 tagged %s ends in a comma after verse %s, which ends in a colon; "
+                "moved back as that verse's text", token, previous_token,
+            )
+            self._append_biblegateway_heading_text(heading, spans, previous, spaced=True)
+
+    @staticmethod
+    def _append_biblegateway_heading_text(heading: Tag, spans: list[Tag], previous: Tag, spaced: bool) -> None:
+        if spaced:
+            previous.append(" ")
+        for span in spans:
+            for child in list(span.contents):
+                previous.append(child.extract())
+        heading.decompose()
+
+    @staticmethod
+    def _biblegateway_verses_adjacent(previous_token: str | None, token: str) -> bool:
+        before = BIBLEGATEWAY_VERSE_CLASS_PATTERN.match(previous_token or "")
+        after = BIBLEGATEWAY_VERSE_CLASS_PATTERN.match(token)
+        if before is None or after is None or before.group(1) != after.group(1) or before.group(2) != after.group(2):
+            return False
+        last = int(before.group(6) if before.group(4) else before.group(3))
+        return int(after.group(3)) == last + 1
 
     def _biblegateway_spilled_chapter_title(self, heading: Tag, token: str) -> list[Tag]:
         """
@@ -1847,6 +1951,7 @@ class HolyBibleScraper:
             heading.decompose()
 
         fragments: list[tuple[int, int, int, str, bool]] = []
+        book_code = ""
         for node in working.select("span.text"):
             if node.find_parent("span", class_="text") is not None:
                 continue
@@ -1858,6 +1963,7 @@ class HolyBibleScraper:
                     break
             if token is None:
                 continue
+            book_code = token.group(1)
             chapter, first = int(token.group(2)), int(token.group(3))
             last = first
             if token.group(4) is not None:
@@ -1916,12 +2022,24 @@ class HolyBibleScraper:
                     return []
                 merged.setdefault(verse_number, []).append((text, is_omitted))
 
+        trailing_headings = BIBLEGATEWAY_TRAILING_HEADING_TOKENS.get(self.get_source_version() or "", frozenset())
         verses: list[Verse] = []
         for verse_number, parts in sorted(merged.items()):
             translated = [text for text, is_omitted in parts if not is_omitted]
             text = " ".join(translated) if translated else BIBLEGATEWAY_OMITTED_VERSE_TEXT
+            token = f"{book_code}-{dominant_chapter}-{verse_number}"
+            if token in trailing_headings:
+                text = self._drop_biblegateway_trailing_heading(token, text)
             verses.append(Verse(verse_number=verse_number, text=text))
         return verses
+
+    @staticmethod
+    def _drop_biblegateway_trailing_heading(token: str, text: str) -> str:
+        match = BIBLEGATEWAY_TRAILING_HEADING_PATTERN.fullmatch(text)
+        if match is None:
+            logger.warning("BibleGateway verse %s is listed with a trailing heading, but none was found; kept as is", token)
+            return text
+        return match.group(1)
 
     def _extract_verses_from_ebible_page(self, soup: BeautifulSoup) -> list[Verse]:
         """
